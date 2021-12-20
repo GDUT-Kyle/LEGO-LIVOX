@@ -54,11 +54,15 @@ link_directories(
 add_executable(livox_repub src/livox_repub.cpp)
 target_link_libraries(livox_repub ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBS})
 
-add_executable(image_projection_node src/image_projection_node.cpp)
-add_dependencies(image_projection_node ${catkin_EXPORTED_TARGETS} cloud_msgs_gencpp)
-target_link_libraries(image_projection_node ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES})
+add_executable(imageProjection src/imageProjection.cpp)
+add_dependencies(imageProjection ${catkin_EXPORTED_TARGETS} cloud_msgs_gencpp)
+target_link_libraries(imageProjection ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES})
 
 
 add_executable(featureAssociation src/featureAssociation.cpp)
 add_dependencies(featureAssociation ${catkin_EXPORTED_TARGETS} cloud_msgs_gencpp)
-target_link_libraries(featureAssociation ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES} ${CERES_LIBRARIES})
+target_link_libraries(featureAssociation ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES})
+
+add_executable(mapOptmization src/mapOptmization.cpp)
+add_dependencies(mapOptmization ${catkin_EXPORTED_TARGETS} cloud_msgs_gencpp)
+target_link_libraries(mapOptmization ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES} gtsam)

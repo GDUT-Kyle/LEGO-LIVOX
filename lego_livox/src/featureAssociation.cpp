@@ -16,13 +16,13 @@ private:
 
     ros::Subscriber subLaserCloud;
     ros::Subscriber subLaserCloudInfo;
-    ros::Subscriber subOutlierCloud;
+    // ros::Subscriber subOutlierCloud;
     ros::Subscriber subImu;
 
-    ros::Publisher pubLaserCloud_line;
-    ros::Publisher pubLaserCloud_line_point;
-    pcl::PointCloud<PointType>::Ptr line_Cloud;
-    pcl::PointCloud<PointType>::Ptr line_point_Cloud;
+    // ros::Publisher pubLaserCloud_line;
+    // ros::Publisher pubLaserCloud_line_point;
+    // pcl::PointCloud<PointType>::Ptr line_Cloud;
+    // pcl::PointCloud<PointType>::Ptr line_point_Cloud;
 
     ros::Publisher pubCornerPointsSharp;
     ros::Publisher pubCornerPointsLessSharp;
@@ -176,7 +176,7 @@ public:
         // 订阅和发布各类话题
         subLaserCloud = nh.subscribe<sensor_msgs::PointCloud2>("/segmented_cloud", 1, &featureAssociation::laserCloudHandler, this);
         subLaserCloudInfo = nh.subscribe<cloud_msgs::cloud_info>("/segmented_cloud_info", 1, &featureAssociation::laserCloudInfoHandler, this);
-        subOutlierCloud = nh.subscribe<sensor_msgs::PointCloud2>("/outlier_cloud", 1, &featureAssociation::outlierCloudHandler, this);
+        // subOutlierCloud = nh.subscribe<sensor_msgs::PointCloud2>("/outlier_cloud", 1, &featureAssociation::outlierCloudHandler, this);
         subImu = nh.subscribe<sensor_msgs::Imu>(imuTopic, 50, &featureAssociation::imuHandler, this);
 
         pubCornerPointsSharp = nh.advertise<sensor_msgs::PointCloud2>("/laser_cloud_sharp", 1);
@@ -189,8 +189,8 @@ public:
         pubOutlierCloudLast = nh.advertise<sensor_msgs::PointCloud2>("/outlier_cloud_last", 2);
         pubLaserOdometry = nh.advertise<nav_msgs::Odometry> ("/laser_odom_to_init", 5);
 
-        pubLaserCloud_line_point = nh.advertise<sensor_msgs::PointCloud2>("/line_point", 2);
-        pubLaserCloud_line = nh.advertise<sensor_msgs::PointCloud2>("/line", 2);
+        // pubLaserCloud_line_point = nh.advertise<sensor_msgs::PointCloud2>("/line_point", 2);
+        // pubLaserCloud_line = nh.advertise<sensor_msgs::PointCloud2>("/line", 2);
         
         initializationValue();
     }
@@ -201,13 +201,13 @@ public:
         cloudSmoothness.resize(N_SCAN*Horizon_SCAN);
 
         // 下采样滤波器设置叶子间距，就是格子之间的最小距离
-        downSizeFilter.setLeafSize(0.8, 0.8, 0.8);
+        downSizeFilter.setLeafSize(0.2, 0.2, 0.2);
 
         segmentedCloud.reset(new pcl::PointCloud<PointType>());
         outlierCloud.reset(new pcl::PointCloud<PointType>());
 
-        line_point_Cloud.reset(new pcl::PointCloud<PointType>());
-        line_Cloud.reset(new pcl::PointCloud<PointType>());
+        // line_point_Cloud.reset(new pcl::PointCloud<PointType>());
+        // line_Cloud.reset(new pcl::PointCloud<PointType>());
 
         cornerPointsSharp.reset(new pcl::PointCloud<PointType>());
         cornerPointsLessSharp.reset(new pcl::PointCloud<PointType>());
@@ -690,11 +690,11 @@ public:
 
     void findCorrespondingSurfFeatures(int iterCount){
         int surfPointsFlatNum = surfPointsFlat->points.size();
-        if(iterCount % 5 == 0)
-        {
-            line_Cloud->clear();
-            line_point_Cloud->clear();
-        }
+        // if(iterCount % 5 == 0)
+        // {
+        //     line_Cloud->clear();
+        //     line_point_Cloud->clear();
+        // }
         // std::cout<<v_transformCur.transpose()<<std::endl;
         double maxDis = 0.0;
         for (int i = 0; i < surfPointsFlatNum; i++) {
@@ -752,12 +752,12 @@ public:
                         pointSearchSurfInd2[i] = pointSearchInd[2];
                         pointSearchSurfInd3[i] = pointSearchInd[4];
 
-                        if(iterCount % 5 == 0)
-                        {pointSel.intensity = i;
-                        line_point_Cloud->push_back(surfPointsFlat->points[i]);
-                        line_Cloud->push_back(laserCloudSurfLast->points[pointSearchSurfInd1[i]]);
-                        line_Cloud->push_back(laserCloudSurfLast->points[pointSearchSurfInd2[i]]);
-                        line_Cloud->push_back(laserCloudSurfLast->points[pointSearchSurfInd3[i]]);}
+                        // if(iterCount % 5 == 0)
+                        // {pointSel.intensity = i;
+                        // line_point_Cloud->push_back(surfPointsFlat->points[i]);
+                        // line_Cloud->push_back(laserCloudSurfLast->points[pointSearchSurfInd1[i]]);
+                        // line_Cloud->push_back(laserCloudSurfLast->points[pointSearchSurfInd2[i]]);
+                        // line_Cloud->push_back(laserCloudSurfLast->points[pointSearchSurfInd3[i]]);}
                     }
                 }
             }
@@ -1340,16 +1340,16 @@ public:
             laserCloudSurfLast2.header.frame_id = "/livox";
             pubLaserCloudSurfLast.publish(laserCloudSurfLast2);
 
-            sensor_msgs::PointCloud2 line_point_msg;
-            pcl::toROSMsg(*line_point_Cloud, line_point_msg);
-            line_point_msg.header.stamp = cloudHeader.stamp;
-            line_point_msg.header.frame_id = "/livox";
-            pubLaserCloud_line_point.publish(line_point_msg);
+            // sensor_msgs::PointCloud2 line_point_msg;
+            // pcl::toROSMsg(*line_point_Cloud, line_point_msg);
+            // line_point_msg.header.stamp = cloudHeader.stamp;
+            // line_point_msg.header.frame_id = "/livox";
+            // pubLaserCloud_line_point.publish(line_point_msg);
 
-            pcl::toROSMsg(*line_Cloud, line_point_msg);
-            line_point_msg.header.stamp = cloudHeader.stamp;
-            line_point_msg.header.frame_id = "/livox";
-            pubLaserCloud_line.publish(line_point_msg);
+            // pcl::toROSMsg(*line_Cloud, line_point_msg);
+            // line_point_msg.header.stamp = cloudHeader.stamp;
+            // line_point_msg.header.frame_id = "/livox";
+            // pubLaserCloud_line.publish(line_point_msg);
         }
     }
 

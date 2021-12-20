@@ -17,7 +17,7 @@
 
     <node pkg="lego_livox" type="livox_repub" name="livox_repub" output="screen" />
 
-    <node pkg="lego_livox" type="image_projection_node"    name="image_projection_node"    output="screen"/>
+    <node pkg="lego_livox" type="imageProjection"    name="imageProjection"    output="screen"/>
 
     <node pkg="lego_livox" type="featureAssociation" name="featureAssociation" output="screen"/>
 

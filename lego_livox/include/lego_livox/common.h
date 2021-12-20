@@ -95,6 +95,9 @@ inline double rad2deg(double radians) { return radians * 180.0 / M_PI; }
 
 inline double deg2rad(double degrees) { return degrees * M_PI / 180.0; }
 
+extern const bool loopClosureEnableFlag = true;
+extern const double mappingProcessInterval = 0.3;
+
 // Livox
 extern const int N_SCAN = 6;
 extern const int Horizon_SCAN = 4000;
@@ -109,7 +112,7 @@ extern const float th_seeds = 0.5;
 extern const int num_iter = 3;
 extern const float th_dist = 0.2;
 
-extern const float DISTANCE_SQ_THRESHOLD = 5.0;
+extern const float DISTANCE_SQ_THRESHOLD = 3.0;
 
 extern const float ext_livox[] = {0.0, 0.0, 0.0, 0.0, 0.07, 0.0};
 
