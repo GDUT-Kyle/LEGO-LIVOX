@@ -21,6 +21,8 @@
 
     <node pkg="lego_livox" type="featureAssociation" name="featureAssociation" output="screen"/>
 
+    <node pkg="lego_livox" type="mapOptmization" name="mapOptmization" output="screen" />
+
     <node pkg="rviz" type="rviz" name="rviz" args="-d $(find lego_livox)/rviz/rviz.rviz" />
 
     <!--- TF -->

@@ -139,8 +139,12 @@ private:
     /*************高频转换量**************/
     // odometry计算得到的到世界坐标系下的转移矩阵
     float transformSum[6];
+    Eigen::Quaternionf q_transformSum;
+    Eigen::Vector3f v_transformSum;
     // 转移增量，只使用了后三个平移增量
     float transformIncre[6];
+    Eigen::Quaternionf q_transformIncre;
+    Eigen::Vector3f v_transformIncre;
 
     /*************低频转换量*************/
     // 以起始位置为原点的世界坐标系下的转换矩阵（猜测与调整的对象）
@@ -149,13 +153,18 @@ private:
     // 3.LM优化后，与IMU有加权融合
     // 4.gtsam优化后，直接取优化值
     float transformTobeMapped[6];
+    Eigen::Quaternionf q_transformTobeMapped;
+    Eigen::Vector3f v_transformTobeMapped;
     // 存放mapping之前的Odometry计算的世界坐标系的转换矩阵（注：低频量，不一定与transformSum一样）
     float transformBefMapped[6];
+    Eigen::Quaternionf q_transformBefMapped;
+    Eigen::Vector3f v_transformBefMapped;
     // 存放mapping之后的经过mapping微调之后的转换矩阵
     // 1.LM优化后，会取融合后的transformTobeMapped[]
     // 2.gtsam优化后，直接取优化值
     float transformAftMapped[6];
-
+    Eigen::Quaternionf q_transformAftMapped;
+    Eigen::Vector3f v_transformAftMapped;
 
     // int imuPointerFront;
     // int imuPointerLast;
@@ -311,6 +320,17 @@ mapOptimization():
             transformAftMapped[i] = 0;
         }
 
+        q_transformSum = Eigen::Quaternionf::Identity();
+        v_transformSum = Eigen::Vector3f::Zero();
+        q_transformIncre = Eigen::Quaternionf::Identity();
+        v_transformIncre = Eigen::Vector3f::Zero();
+        q_transformTobeMapped = Eigen::Quaternionf::Identity();
+        v_transformTobeMapped = Eigen::Vector3f::Zero();
+        q_transformBefMapped = Eigen::Quaternionf::Identity();
+        v_transformBefMapped = Eigen::Vector3f::Zero();
+        q_transformAftMapped = Eigen::Quaternionf::Identity();
+        v_transformAftMapped = Eigen::Vector3f::Zero();
+
         // 初始化　先验噪声＼里程计噪声
         gtsam::Vector Vector6(6);
         Vector6 << 1e-6, 1e-6, 1e-6, 1e-8, 1e-8, 1e-6;
@@ -360,6 +380,7 @@ mapOptimization():
 
     void laserOdometryHandler(const nav_msgs::Odometry::ConstPtr& laserOdometry){
         timeLaserOdometry = laserOdometry->header.stamp.toSec();
+
         double roll, pitch, yaw;
         geometry_msgs::Quaternion geoQuat = laserOdometry->pose.pose.orientation;
         tf::Matrix3x3(tf::Quaternion(geoQuat.x, geoQuat.y, geoQuat.z, geoQuat.w)).getRPY(roll, pitch, yaw);
@@ -369,7 +390,39 @@ mapOptimization():
         transformSum[3] = laserOdometry->pose.pose.position.x;
         transformSum[4] = laserOdometry->pose.pose.position.y;
         transformSum[5] = laserOdometry->pose.pose.position.z;
+
+        q_transformSum.x() = laserOdometry->pose.pose.orientation.x;
+        q_transformSum.y() = laserOdometry->pose.pose.orientation.y;
+        q_transformSum.z() = laserOdometry->pose.pose.orientation.z;
+        q_transformSum.w() = laserOdometry->pose.pose.orientation.w;
+        v_transformSum.x() = laserOdometry->pose.pose.position.x;
+        v_transformSum.y() = laserOdometry->pose.pose.position.y;
+        v_transformSum.z() = laserOdometry->pose.pose.position.z;
         newLaserOdometry = true;
+    }
+
+    // 将坐标转移到世界坐标系下,得到可用于建图的Lidar坐标，即修改了transformTobeMapped的值
+    void transformAssociateToMap()
+    {
+        v_transformIncre = v_transformSum - v_transformBefMapped;
+        q_transformIncre = q_transformBefMapped.inverse() * q_transformSum;
+
+        // 遵守先平移后旋转的规矩
+        v_transformTobeMapped = v_transformAftMapped + q_transformTobeMapped * v_transformIncre;
+        q_transformTobeMapped = q_transformAftMapped * q_transformIncre;
+
+        // 后面记得更新transformBefMapped
+    }
+
+    void extractSurroundingKeyFrames(){
+        // if()
+    }
+
+    void clearCloud(){
+        laserCloudCornerFromMap->clear();
+        laserCloudSurfFromMap->clear();
+        laserCloudCornerFromMapDS->clear();
+        laserCloudSurfFromMapDS->clear();   
     }
 
     void run(){
@@ -391,12 +444,12 @@ mapOptimization():
                 // 储存里程计数据时间戳
                 timeLastProcessing = timeLaserOdometry;
 
-                // // 啥玩意
-                // transformAssociateToMap();
+                // 啥玩意
+                transformAssociateToMap();
 
                 // // 提取上一帧优化得到的位姿附近的临近点
                 // // 合并成局部地图
-                // extractSurroundingKeyFrames();
+                extractSurroundingKeyFrames();
 
                 // // 当前帧的 边缘点集合，平面点集合降采样
                 // downsampleCurrentScan();
@@ -414,7 +467,7 @@ mapOptimization():
 
                 // publishKeyPosesAndFrames();
 
-                // clearCloud();
+                clearCloud();
             }
         }
     }
