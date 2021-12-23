@@ -95,7 +95,7 @@ inline double rad2deg(double radians) { return radians * 180.0 / M_PI; }
 
 inline double deg2rad(double degrees) { return degrees * M_PI / 180.0; }
 
-extern const bool loopClosureEnableFlag = true;
+extern const bool loopClosureEnableFlag = false;
 extern const double mappingProcessInterval = 0.3;
 
 // Livox
@@ -114,7 +114,7 @@ extern const float th_dist = 0.2;
 
 extern const float DISTANCE_SQ_THRESHOLD = 3.0;
 
-extern const float ext_livox[] = {0.0, 0.0, 0.0, 0.0, 0.07, 0.0};
+extern const float ext_livox[] = {0.0, 0.0, 0.0, 0.0, 0.00, 0.0};
 
 extern const float scanPeriod = 0.1;
 extern const int systemDelay = 0;
@@ -140,6 +140,19 @@ extern const float surroundingKeyframeSearchRadius = 50.0;
 extern const int   surroundingKeyframeSearchNum = 50;
 
 void anti_symmetric(Eigen::Vector3d const &_v, Eigen::Matrix3d &_m)
+{
+    _m(0, 0) = 0.0;
+    _m(0, 1) = -_v.z();
+    _m(0, 2) = _v.y();
+    _m(1, 0) = _v.z();
+    _m(1, 1) = 0.0;
+    _m(1, 2) = -_v.x();
+    _m(2, 0) = -_v.y();
+    _m(2, 1) = _v.x();
+    _m(2, 2) = 0.0;
+}
+
+void anti_symmetric(Eigen::Vector3f const &_v, Eigen::Matrix3f &_m)
 {
     _m(0, 0) = 0.0;
     _m(0, 1) = -_v.z();

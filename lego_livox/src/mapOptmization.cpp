@@ -135,6 +135,8 @@ private:
     bool newLaserCloudOutlierLast;
 
     float transformLast[6];         // 保存上一次LM优化后的位姿
+    Eigen::Quaternionf q_transformLast;
+    Eigen::Vector3f v_transformLast;
 
     /*************高频转换量**************/
     // odometry计算得到的到世界坐标系下的转移矩阵
@@ -243,11 +245,13 @@ mapOptimization():
         downSizeFilterGlobalMapKeyPoses.setLeafSize(1.0, 1.0, 1.0);
         downSizeFilterGlobalMapKeyFrames.setLeafSize(0.4, 0.4, 0.4);
 
-        odomAftMapped.header.frame_id = "/camera_init";
-        odomAftMapped.child_frame_id = "/aft_mapped";
+        odomAftMapped.header.frame_id = "/livox_init";
+        // odomAftMapped.child_frame_id = "/aft_mapped";
+        odomAftMapped.child_frame_id = "/livox";
 
-        aftMappedTrans.frame_id_ = "/camera_init";
-        aftMappedTrans.child_frame_id_ = "/aft_mapped";
+        aftMappedTrans.frame_id_ = "/livox_init";
+        // aftMappedTrans.child_frame_id_ = "/aft_mapped";
+        aftMappedTrans.child_frame_id_ = "/livox";
 
         allocateMemory();
     }
@@ -330,6 +334,8 @@ mapOptimization():
         v_transformBefMapped = Eigen::Vector3f::Zero();
         q_transformAftMapped = Eigen::Quaternionf::Identity();
         v_transformAftMapped = Eigen::Vector3f::Zero();
+        q_transformLast = Eigen::Quaternionf::Identity();
+        v_transformLast = Eigen::Vector3f::Zero();
 
         // 初始化　先验噪声＼里程计噪声
         gtsam::Vector Vector6(6);
@@ -349,7 +355,7 @@ mapOptimization():
         matV1 = cv::Mat (3, 3, CV_32F, cv::Scalar::all(0));
 
         isDegenerate = false;
-        matP = Eigen::Matrix<double, 6, 6>::Zero();
+        matP = Eigen::Matrix<float, 6, 6>::Zero();
 
         laserCloudCornerFromMapDSNum = 0;
         laserCloudSurfFromMapDSNum = 0;
@@ -407,16 +413,57 @@ mapOptimization():
         v_transformIncre = v_transformSum - v_transformBefMapped;
         q_transformIncre = q_transformBefMapped.inverse() * q_transformSum;
 
+        // std::cout<<"v_transformIncre : "<<v_transformIncre.transpose()<<std::endl;
+
         // 遵守先平移后旋转的规矩
         v_transformTobeMapped = v_transformAftMapped + q_transformTobeMapped * v_transformIncre;
         q_transformTobeMapped = q_transformAftMapped * q_transformIncre;
 
+        // transformTobeMapped[3] = v_transformTobeMapped[0];
+        // transformTobeMapped[4] = v_transformTobeMapped[1];
+        // transformTobeMapped[5] = v_transformTobeMapped[2];
+        // Eigen::Vector3f rotation = q_transformTobeMapped.toRotationMatrix().eulerAngles(0, 1, 2);
+        // transformTobeMapped[0] = rotation[0];
+        // transformTobeMapped[1] = rotation[1];
+        // transformTobeMapped[2] = rotation[2];
+
         // 后面记得更新transformBefMapped
+    }
+
+    void updateTransformTobeMapped()
+    {
+        v_transformTobeMapped =  Eigen::Vector3f(transformTobeMapped[3], 
+                                                transformTobeMapped[4], 
+                                                transformTobeMapped[5]);
+        Eigen::AngleAxisf rollAngle = Eigen::AngleAxisf(transformTobeMapped[0], 
+                                                        Eigen::Vector3f::UnitX());
+        Eigen::AngleAxisf pitchAngle = Eigen::AngleAxisf(transformTobeMapped[1], 
+                                                        Eigen::Vector3f::UnitY());
+        Eigen::AngleAxisf yawAngle = Eigen::AngleAxisf(transformTobeMapped[2], 
+                                                        Eigen::Vector3f::UnitZ());
+        q_transformTobeMapped = rollAngle * pitchAngle * yawAngle;
+    }
+
+    void updateTransformTobeMapped_()
+    {
+        // v_transformTobeMapped =  Eigen::Vector3f(transformTobeMapped[3], 
+        //                                         transformTobeMapped[4], 
+        //                                         transformTobeMapped[5]);
+        // Eigen::AngleAxisf rollAngle = Eigen::AngleAxisf(transformTobeMapped[0], 
+        //                                                 Eigen::Vector3f::UnitX());
+        // Eigen::AngleAxisf pitchAngle = Eigen::AngleAxisf(transformTobeMapped[1], 
+        //                                                 Eigen::Vector3f::UnitY());
+        // Eigen::AngleAxisf yawAngle = Eigen::AngleAxisf(transformTobeMapped[2], 
+        //                                                 Eigen::Vector3f::UnitZ());
+        // q_transformTobeMapped = rollAngle * pitchAngle * yawAngle;
     }
 
     pcl::PointCloud<PointType>::Ptr transformPointCloud(pcl::PointCloud<PointType>::Ptr cloudIn,
                                                         const PointTypePose* const tIn)
     {
+        pcl::PointCloud<PointType>::Ptr cloudOut(new pcl::PointCloud<PointType>());
+        PointType pointTo;
+
         Eigen::AngleAxisf rollAngle(
             Eigen::AngleAxisf(tIn->roll, Eigen::Vector3f::UnitX())
         );
@@ -432,15 +479,19 @@ mapOptimization():
 
         for(int i=0; i<cloudIn->size(); i++)
         {
+            pointTo = cloudIn->points[i];
             Eigen::Vector3f point(cloudIn->points[i].x,
                                     cloudIn->points[i].y,
                                     cloudIn->points[i].z);
             point = q_tIn * point + v_tIn;
 
-            cloudIn->points[i].x = point.x();
-            cloudIn->points[i].y = point.y();
-            cloudIn->points[i].z = point.z();
+            pointTo.x = point.x();
+            pointTo.y = point.y();
+            pointTo.z = point.z();
+
+            cloudOut->push_back(pointTo);
         }
+        return cloudOut;
     }
 
     void extractSurroundingKeyFrames(){
@@ -467,6 +518,7 @@ mapOptimization():
                                                     pointSearchInd,
                                                     pointSearchSqDis,
                                                     0);
+            // std::cout<<"cloudKeyPoses3D : "<<cloudKeyPoses3D->size()<<std::endl;
             // 遍历找到的临近点,取对应的位姿xyz坐标到surroundingKeyPoses
             for(int i=0; i<pointSearchInd.size(); i++)
                 surroundingKeyPoses->points.push_back(cloudKeyPoses3D->points[pointSearchInd[i]]);
@@ -508,6 +560,7 @@ mapOptimization():
                     --i;
                 }
             }
+            // std::cout<<"surroundingExistingKeyPosesID : "<<surroundingExistingKeyPosesID.size()<<std::endl;
 
             // 上一个两重for循环主要用于删除数据，此处的两重for循环用来添加数据
             // 遍历最新的最近临列表，如果已存在keypose容器中没有新找到的临近点，则添加进去容器
@@ -548,6 +601,7 @@ mapOptimization():
                     // surroundingOutlierCloudKeyFrames.push_back(transformPointCloud(outlierCloudKeyFrames[thisKeyInd], &thisTransformation));
                 }
             }
+            // std::cout<<"surroundingCornerCloudKeyFrames : "<<surroundingCornerCloudKeyFrames.size()<<std::endl;
             // 重新遍历已存在的keypose容器，对最近临keypose进行地图拼接
             // 得到局部地图 [世界坐标系(相机导航坐标系n')]
             for(int i=0; i<surroundingExistingKeyPosesID.size(); i++)
@@ -778,8 +832,6 @@ mapOptimization():
 
                     // 距离不要取绝对值
                     double pd2 = ld.dot(tmp_p - tmp_a);
-                    // if(pd2 > 0.1 || pd2 < -0.1) continue;
-                    // maxDis += pd2;
 
                     // std::cout<<"pd2 = "<<pd2<<", ";
 
@@ -792,7 +844,8 @@ mapOptimization():
                     // maxDis = std::max(maxDis, pd2);
                     float s;
                     // 加上影响因子
-                    s = 1 - 0.9 * fabs(pd2);
+                    s = 1 - 0.9 * fabs(pd2)/ sqrt(sqrt(pointSel.x * pointSel.x
+                            + pointSel.y * pointSel.y + pointSel.z * pointSel.z));
 
                     if (s > 0.1) {
                         // [x,y,z]是整个平面的单位法量
@@ -815,6 +868,8 @@ mapOptimization():
     {
         int pointSelNum = laserCloudOri->points.size();
 
+        // std::cout<<"pointSelNum : "<<pointSelNum<<std::endl;
+
         if(pointSelNum < 50)
             return false;
 
@@ -825,6 +880,8 @@ mapOptimization():
         Eigen::Matrix<float, 6, 1> b = Eigen::Matrix<float, 6, 1>::Zero();
 
         Eigen::Matrix<float, 6, 1> Delta_x = Eigen::Matrix<float, 6, 1>::Zero();
+        Eigen::Quaternionf q_Delta_x = Eigen::Quaternionf::Identity();
+        Eigen::Vector3f v_Delta_x = Eigen::Vector3f::Zero();
 
         for(int i=0; i<pointSelNum; i++)
         {
@@ -834,17 +891,17 @@ mapOptimization():
             coeff = coeffSel->points[i];
 
             // 1. 计算G函数，通过估计的变换transformCur将pointOri转换到b_k坐标系
-            v_pointOri_bk1.x() = pointOri.x;
-            v_pointOri_bk1.y() = pointOri.y;
-            v_pointOri_bk1.z() = pointOri.z;
+            v_pointOri_bk1(0, 0) = pointOri.x;
+            v_pointOri_bk1(1, 0) = pointOri.y;
+            v_pointOri_bk1(2, 0) = pointOri.z;
             // 2. dD/dG = (la, lb, lc)
             Eigen::Matrix<float, 1, 3> dDdG;
             dDdG << coeff.x, coeff.y, coeff.z;
             // 3. 将transformCur转成R，然后计算(-Rp)^
-            Eigen::Matrix3d neg_Rp_sym;
+            Eigen::Matrix3f neg_Rp_sym;
             anti_symmetric(-q_transformTobeMapped.toRotationMatrix()*v_pointOri_bk1, neg_Rp_sym);
             // 4. 计算(dD/dG)*(-Rp)^得到关于旋转的雅克比，取其中的yaw部分，记为j_yaw
-            Eigen::Matrix<double, 1, 3> dDdR = dDdG * neg_Rp_sym;
+            Eigen::Matrix<float, 1, 3> dDdR = dDdG * neg_Rp_sym;
             // 5. 计算关于平移的雅克比，即为(dD/dG)，取其中的x,y部分，记为j_x,j_y
             // 6. 组织该点的雅克比：[j_yaw,j_x,j_y]
             j_n(0, 0) = dDdR(0, 0);
@@ -871,7 +928,7 @@ mapOptimization():
 
             // 计算At*A的特征值和特征向量
             // 特征值存放在matE，特征向量matV
-            Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigenSolver(H);
+            Eigen::SelfAdjointEigenSolver<Eigen::Matrix<float, 6, 6>> eigenSolver(H);
             matE = eigenSolver.eigenvalues();
             matV = eigenSolver.eigenvectors();
 
@@ -895,20 +952,44 @@ mapOptimization():
         }
 
         if (isDegenerate) {
-            Eigen::Matrix<double, 3, 1> matX2 = Eigen::Matrix<double, 3, 1>::Zero();
+            Eigen::Matrix<float, 6, 1> matX2 = Eigen::Matrix<float, 6, 1>::Zero();
             // matX.copyTo(matX2);
             matX2 = Delta_x;
             Delta_x = matP * matX2;
         }
 
-        transformTobeMapped[0] += Delta_x(0, 0);
-        transformTobeMapped[1] += Delta_x(1, 0);
-        transformTobeMapped[2] += Delta_x(2, 0);
-        transformTobeMapped[3] += Delta_x(3, 0);
-        transformTobeMapped[4] += Delta_x(4, 0);
-        transformTobeMapped[5] += Delta_x(5, 0);
+        // 更新
+        v_Delta_x[0] = Delta_x(3, 0);
+        v_Delta_x[1] = Delta_x(4, 0);
+        v_Delta_x[2] = Delta_x(5, 0);
+        // Eigen::AngleAxisf rollAngle = Eigen::AngleAxisf(Delta_x(0, 0), 
+        //                                                 Eigen::Vector3f::UnitX());
+        // Eigen::AngleAxisf pitchAngle = Eigen::AngleAxisf(Delta_x(1, 0), 
+        //                                                 Eigen::Vector3f::UnitY());
+        // Eigen::AngleAxisf yawAngle = Eigen::AngleAxisf(Delta_x(2, 0), 
+        //                                                 Eigen::Vector3f::UnitZ());
+        Eigen::Vector3f axis = Delta_x.block<3, 1>(0, 0);
+        axis.normalize();
+        Eigen::AngleAxisf Angle = Eigen::AngleAxisf(Delta_x.block<3, 1>(0, 0).norm(), axis);
+        // q_Delta_x = rollAngle*pitchAngle*yawAngle;
+        q_Delta_x = Angle;
+        q_transformTobeMapped = q_transformTobeMapped * q_Delta_x;
+        v_transformTobeMapped = v_transformTobeMapped + v_Delta_x;
+
+        // std::cout<<iterCount<<"] Delta_x = "<<Delta_x.transpose()<<std::endl;
+
+        // transformTobeMapped[0] += Delta_x(0, 0);
+        // transformTobeMapped[1] += Delta_x(1, 0);
+        // transformTobeMapped[2] += Delta_x(2, 0);
+        // transformTobeMapped[3] += Delta_x(3, 0);
+        // transformTobeMapped[4] += Delta_x(4, 0);
+        // transformTobeMapped[5] += Delta_x(5, 0);
+        Eigen::Vector3f tmp = q_transformTobeMapped.toRotationMatrix().eulerAngles(0, 1, 2);
+
+        std::cout<<"transformTobeMapped[2] : "<<tmp[2]/PI*180<<std::endl;
 
         // ！！！ 要及时更新transformTobeMapped
+        // updateTransformTobeMapped();
 
         float deltaR = sqrt(
                             pow(pcl::rad2deg(Delta_x(0, 0)), 2) +
@@ -956,6 +1037,181 @@ mapOptimization():
         }
     }
 
+    void saveKeyFramesAndFactor()
+    {
+        // 取优化后的位姿transformAftMapped[]
+        // 储存到currentRobotPosPoint
+        currentRobotPosPoint.x = v_transformAftMapped[0];
+        currentRobotPosPoint.y = v_transformAftMapped[1];
+        currentRobotPosPoint.z = v_transformAftMapped[2];
+
+        // 如果两次优化之间欧式距离<0.3，则不保存，不作为关键帧
+        bool saveThisKeyFrame = true;
+        if (sqrt((previousRobotPosPoint.x-currentRobotPosPoint.x)*(previousRobotPosPoint.x-currentRobotPosPoint.x)
+                +(previousRobotPosPoint.y-currentRobotPosPoint.y)*(previousRobotPosPoint.y-currentRobotPosPoint.y)
+                +(previousRobotPosPoint.z-currentRobotPosPoint.z)*(previousRobotPosPoint.z-currentRobotPosPoint.z)) < 0.3){
+            saveThisKeyFrame = false;
+        }
+
+        // 非关键帧 并且 非空，直接返回
+        if (saveThisKeyFrame == false && !cloudKeyPoses3D->points.empty())
+        	return;
+
+        previousRobotPosPoint = currentRobotPosPoint;
+
+        // Eigen::Matrix<double, 3, 3> q_tmp;
+        // Eigen::Matrix<double, 3, 1> v_tmp;
+        // 如果还没有关键帧
+        if (cloudKeyPoses3D->points.empty()){
+            // static Rot3 	RzRyRx (double x, double y, double z),Rotations around Z, Y, then X axes
+            // RzRyRx依次按照z(transformTobeMapped[2])，y(transformTobeMapped[0])，x(transformTobeMapped[1])坐标轴旋转
+            // Point3 (double x, double y, double z)  Construct from x(transformTobeMapped[5]), y(transformTobeMapped[3]), and z(transformTobeMapped[4]) coordinates. 
+            // Pose3 (const Rot3 &R, const Point3 &t) Construct from R,t. 从旋转和平移构造姿态
+            // NonlinearFactorGraph增加一个PriorFactor因子
+            // 构造的因子是在 载体坐标系b系及导航坐标系n系下的
+            // 第一帧，作为先验因子
+            gtSAMgraph.add(PriorFactor<Pose3>(0, Pose3(Rot3(q_transformTobeMapped.toRotationMatrix().cast<double>()),
+                                                    v_transformTobeMapped.cast<double>()), priorNoise));
+            // initialEstimate的数据类型是Values,其实就是一个map，这里在0对应的值下面保存了一个Pose3
+            initialEstimate.insert(0, Pose3(Rot3(q_transformTobeMapped.toRotationMatrix().cast<double>()),
+                                                    v_transformTobeMapped.cast<double>()));
+            // for (int i = 0; i < 6; ++i)
+            // 	transformLast[i] = transformTobeMapped[i];
+            q_transformLast = q_transformTobeMapped;
+            v_transformLast = v_transformTobeMapped;
+
+            // std::cout<<"v_transformTobeMapped : "<<v_transformTobeMapped.cast<double>().transpose()<<std::endl;
+        }
+        else{
+            // 非第一帧，添加边
+            gtsam::Pose3 poseFrom = Pose3(Rot3(q_transformLast.toRotationMatrix().cast<double>()),
+                                                    v_transformLast.cast<double>());
+            gtsam::Pose3 poseTo   = Pose3(Rot3(q_transformAftMapped.toRotationMatrix().cast<double>()),
+                                                    v_transformAftMapped.cast<double>());
+			
+            // 构造函数原型:BetweenFactor (Key key1, Key key2, const VALUE &measured, const SharedNoiseModel &model)
+            gtSAMgraph.add(BetweenFactor<Pose3>(cloudKeyPoses3D->points.size()-1, cloudKeyPoses3D->points.size(), poseFrom.between(poseTo), odometryNoise));
+            initialEstimate.insert(cloudKeyPoses3D->points.size(), poseTo);
+        }
+        // gtsam::ISAM2::update函数原型:
+        // ISAM2Result gtsam::ISAM2::update	(	const NonlinearFactorGraph & 	newFactors = NonlinearFactorGraph(),
+        // const Values & 	newTheta = Values(),
+        // const std::vector< size_t > & 	removeFactorIndices = std::vector<size_t>(),
+        // const boost::optional< FastMap< Key, int > > & 	constrainedKeys = boost::none,
+        // const boost::optional< FastList< Key > > & 	noRelinKeys = boost::none,
+        // const boost::optional< FastList< Key > > & 	extraReelimKeys = boost::none,
+        // bool 	force_relinearize = false )	
+        // gtSAMgraph是新加到系统中的因子
+        // initialEstimate是加到系统中的新变量的初始点
+        isam->update(gtSAMgraph, initialEstimate);
+        // update 函数为什么需要调用两次？
+        // isam2用法
+        isam->update();
+
+        // 删除内容?
+        gtSAMgraph.resize(0);
+		initialEstimate.clear();
+
+        PointType thisPose3D;
+        PointTypePose thisPose6D;
+        Pose3 latestEstimate;
+
+        // Compute an estimate from the incomplete linear delta computed during the last update.
+        isamCurrentEstimate = isam->calculateEstimate();
+        latestEstimate = isamCurrentEstimate.at<Pose3>(isamCurrentEstimate.size()-1);
+
+        // 取优化结果
+        // 又回到相机坐标系c系以及导航坐标系n'
+        thisPose3D.x = latestEstimate.translation().x();
+        thisPose3D.y = latestEstimate.translation().y();
+        thisPose3D.z = latestEstimate.translation().z();
+        thisPose3D.intensity = cloudKeyPoses3D->points.size();
+        cloudKeyPoses3D->push_back(thisPose3D);
+
+        // std::cout<<"latestEstimate : "<<latestEstimate.translation().transpose()<<std::endl;
+
+        thisPose6D.x = thisPose3D.x;
+        thisPose6D.y = thisPose3D.y;
+        thisPose6D.z = thisPose3D.z;
+        thisPose6D.intensity = thisPose3D.intensity;
+        thisPose6D.roll  = latestEstimate.rotation().roll();
+        thisPose6D.pitch = latestEstimate.rotation().pitch();
+        thisPose6D.yaw   = latestEstimate.rotation().yaw();
+        thisPose6D.time = timeLaserOdometry;
+        cloudKeyPoses6D->push_back(thisPose6D);
+
+        // 更新transformAftMapped[]
+        // 更新transformAftMapped[]
+        if (cloudKeyPoses3D->points.size() > 1){
+            q_transformAftMapped = latestEstimate.rotation().toQuaternion().cast<float>();
+            v_transformAftMapped = latestEstimate.translation().cast<float>();
+
+            q_transformLast = q_transformAftMapped;
+            v_transformLast = v_transformAftMapped;
+
+            q_transformTobeMapped = q_transformAftMapped;
+            v_transformTobeMapped = v_transformAftMapped;
+        }
+
+        // 把新帧作为keypose，保存对应的边缘点、平面点
+        pcl::PointCloud<PointType>::Ptr thisCornerKeyFrame(new pcl::PointCloud<PointType>());
+        pcl::PointCloud<PointType>::Ptr thisSurfKeyFrame(new pcl::PointCloud<PointType>());
+        pcl::PointCloud<PointType>::Ptr thisOutlierKeyFrame(new pcl::PointCloud<PointType>());
+
+        // PCL::copyPointCloud(const pcl::PCLPointCloud2 &cloud_in,pcl::PCLPointCloud2 &cloud_out )   
+        pcl::copyPointCloud(*laserCloudCornerLastDS,  *thisCornerKeyFrame);
+        pcl::copyPointCloud(*laserCloudSurfLastDS,    *thisSurfKeyFrame);
+
+        cornerCloudKeyFrames.push_back(thisCornerKeyFrame);
+        surfCloudKeyFrames.push_back(thisSurfKeyFrame);
+    }
+
+    void publishTF(){
+        // geometry_msgs::Quaternion geoQuat = tf::createQuaternionMsgFromRollPitchYaw
+        //                           (transformAftMapped[2], -transformAftMapped[0], -transformAftMapped[1]);
+
+        odomAftMapped.header.stamp = ros::Time().fromSec(timeLaserOdometry);
+        odomAftMapped.pose.pose.orientation.x = q_transformAftMapped.x();
+        odomAftMapped.pose.pose.orientation.y = q_transformAftMapped.y();
+        odomAftMapped.pose.pose.orientation.z = q_transformAftMapped.z();
+        odomAftMapped.pose.pose.orientation.w = q_transformAftMapped.w();
+        odomAftMapped.pose.pose.position.x = v_transformAftMapped.x();
+        odomAftMapped.pose.pose.position.y = v_transformAftMapped.y();
+        odomAftMapped.pose.pose.position.z = v_transformAftMapped.z();
+        pubOdomAftMapped.publish(odomAftMapped);
+
+        // std::cout<<"v_transformAftMapped : "<<v_transformAftMapped.transpose()<<std::endl;
+
+        aftMappedTrans.stamp_ = ros::Time().fromSec(timeLaserOdometry);
+        aftMappedTrans.setRotation(tf::Quaternion(q_transformAftMapped.x(),
+                                                 q_transformAftMapped.y(), 
+                                                 q_transformAftMapped.z(), 
+                                                 q_transformAftMapped.w()));
+        aftMappedTrans.setOrigin(tf::Vector3(v_transformAftMapped.x(), 
+                                                v_transformAftMapped.y(), 
+                                                v_transformAftMapped.z()));
+        tfBroadcaster.sendTransform(aftMappedTrans);
+    }
+
+    void publishKeyPosesAndFrames(){
+        // 发布关键帧位置
+        if (pubKeyPoses.getNumSubscribers() != 0){
+            sensor_msgs::PointCloud2 cloudMsgTemp;
+            pcl::toROSMsg(*cloudKeyPoses3D, cloudMsgTemp);
+            cloudMsgTemp.header.stamp = ros::Time().fromSec(timeLaserOdometry);
+            cloudMsgTemp.header.frame_id = "/livox_init";
+            pubKeyPoses.publish(cloudMsgTemp);
+        }
+        // 发布局部地图
+        if (pubRecentKeyFrames.getNumSubscribers() != 0){
+            sensor_msgs::PointCloud2 cloudMsgTemp;
+            pcl::toROSMsg(*laserCloudSurfFromMapDS, cloudMsgTemp);
+            cloudMsgTemp.header.stamp = ros::Time().fromSec(timeLaserOdometry);
+            cloudMsgTemp.header.frame_id = "/livox_init";
+            pubRecentKeyFrames.publish(cloudMsgTemp);
+        }
+    }
+
     void clearCloud(){
         laserCloudCornerFromMap->clear();
         laserCloudSurfFromMap->clear();
@@ -982,7 +1238,6 @@ mapOptimization():
                 // 储存里程计数据时间戳
                 timeLastProcessing = timeLaserOdometry;
 
-                // 啥玩意
                 transformAssociateToMap();
 
                 // 提取上一帧优化得到的位姿附近的临近点
@@ -995,15 +1250,15 @@ mapOptimization():
                 // 当前扫描进行优化，图优化以及进行LM优化的过程
                 scan2MapOptimization();
 
-                // // 关键帧判断，gtsam优化
-                // saveKeyFramesAndFactor();
+                // 关键帧判断，gtsam优化
+                saveKeyFramesAndFactor();
 
-                // //
+                //
                 // correctPoses();
 
-                // publishTF();
+                publishTF();
 
-                // publishKeyPosesAndFrames();
+                publishKeyPosesAndFrames();
 
                 clearCloud();
             }

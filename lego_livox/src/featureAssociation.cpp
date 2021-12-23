@@ -290,10 +290,10 @@ public:
         kdtreeSurfLast.reset(new pcl::KdTreeFLANN<PointType>());
 
         laserOdometry.header.frame_id = "/livox_init";
-        laserOdometry.child_frame_id = "/livox";
+        laserOdometry.child_frame_id = "/livox_odom";
 
         laserOdometryTrans.frame_id_ = "/livox_init";
-        laserOdometryTrans.child_frame_id_ = "/livox";
+        laserOdometryTrans.child_frame_id_ = "/livox_odom";
         
         isDegenerate = false;
         matP = Eigen::Matrix<double, 3, 3>::Zero();
