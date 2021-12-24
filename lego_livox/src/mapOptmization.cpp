@@ -45,6 +45,8 @@ private:
     tf::StampedTransform aftMappedTrans;
     tf::TransformBroadcaster tfBroadcaster;
 
+    tf::StampedTransform aftMappedOdomTrans;
+
     vector<pcl::PointCloud<PointType>::Ptr> cornerCloudKeyFrames;
     vector<pcl::PointCloud<PointType>::Ptr> surfCloudKeyFrames;
 
@@ -65,7 +67,8 @@ private:
     pcl::PointCloud<PointType>::Ptr cloudKeyPoses3D;
 
     //PointTypePose的XYZI保存和cloudKeyPoses3D一样的内容，另外还保存RPY角度以及一个时间值timeLaserOdometry
-    pcl::PointCloud<PointTypePose>::Ptr cloudKeyPoses6D;
+    // pcl::PointCloud<PointTypePose>::Ptr cloudKeyPoses6D;
+    pcl::PointCloud<myPointTypePose>::Ptr cloudKeyPoses6D;
     
     // 结尾有DS代表是downsize,进行过下采样
     pcl::PointCloud<PointType>::Ptr surroundingKeyPoses;
@@ -246,12 +249,16 @@ mapOptimization():
         downSizeFilterGlobalMapKeyFrames.setLeafSize(0.4, 0.4, 0.4);
 
         odomAftMapped.header.frame_id = "/livox_init";
-        // odomAftMapped.child_frame_id = "/aft_mapped";
-        odomAftMapped.child_frame_id = "/livox";
+        odomAftMapped.child_frame_id = "/aft_mapped";
+        // odomAftMapped.child_frame_id = "/livox";
 
         aftMappedTrans.frame_id_ = "/livox_init";
+        aftMappedTrans.child_frame_id_ = "/aft_mapped";
+        // aftMappedTrans.child_frame_id_ = "/livox";
+
+        aftMappedOdomTrans.frame_id_ = "/livox_init";
         // aftMappedTrans.child_frame_id_ = "/aft_mapped";
-        aftMappedTrans.child_frame_id_ = "/livox";
+        aftMappedOdomTrans.child_frame_id_ = "/livox";
 
         allocateMemory();
     }
@@ -259,7 +266,7 @@ mapOptimization():
     void allocateMemory(){
 
         cloudKeyPoses3D.reset(new pcl::PointCloud<PointType>());
-        cloudKeyPoses6D.reset(new pcl::PointCloud<PointTypePose>());
+        cloudKeyPoses6D.reset(new pcl::PointCloud<myPointTypePose>());
 
         kdtreeSurroundingKeyPoses.reset(new pcl::KdTreeFLANN<PointType>());
         kdtreeHistoryKeyPoses.reset(new pcl::KdTreeFLANN<PointType>());
@@ -405,13 +412,31 @@ mapOptimization():
         v_transformSum.y() = laserOdometry->pose.pose.position.y;
         v_transformSum.z() = laserOdometry->pose.pose.position.z;
         newLaserOdometry = true;
+
+        Eigen::Vector3f v_transformIncre_, v_transformTobeMapped_;
+        Eigen::Quaternionf q_transformIncre_, q_transformTobeMapped_;
+        v_transformIncre_ = v_transformSum - v_transformBefMapped;
+        q_transformIncre_ = q_transformSum * q_transformBefMapped.inverse();
+        v_transformIncre_ = q_transformBefMapped.inverse() * v_transformIncre_;
+        v_transformTobeMapped_ = v_transformAftMapped + q_transformAftMapped * v_transformIncre_;
+        q_transformTobeMapped_ = q_transformAftMapped * q_transformIncre_;
+        aftMappedOdomTrans.stamp_ = ros::Time().fromSec(timeLaserOdometry);
+        aftMappedOdomTrans.setRotation(tf::Quaternion(q_transformTobeMapped_.x(),
+                                                 q_transformTobeMapped_.y(), 
+                                                 q_transformTobeMapped_.z(), 
+                                                 q_transformTobeMapped_.w()));
+        aftMappedOdomTrans.setOrigin(tf::Vector3(v_transformTobeMapped_.x(), 
+                                                v_transformTobeMapped_.y(), 
+                                                v_transformTobeMapped_.z()));
+        tfBroadcaster.sendTransform(aftMappedOdomTrans);
     }
 
     // 将坐标转移到世界坐标系下,得到可用于建图的Lidar坐标，即修改了transformTobeMapped的值
     void transformAssociateToMap()
     {
         v_transformIncre = v_transformSum - v_transformBefMapped;
-        q_transformIncre = q_transformBefMapped.inverse() * q_transformSum;
+        q_transformIncre = q_transformSum * q_transformBefMapped.inverse();
+        v_transformIncre = q_transformBefMapped.inverse() * v_transformIncre;
 
         // std::cout<<"v_transformIncre : "<<v_transformIncre.transpose()<<std::endl;
 
@@ -475,6 +500,41 @@ mapOptimization():
         ); 
         Eigen::Quaternionf q_tIn;
         q_tIn = rollAngle * pitchAngle * yawAngle;
+        Eigen::Vector3f v_tIn(tIn->x, tIn->y, tIn->z);
+
+        for(int i=0; i<cloudIn->size(); i++)
+        {
+            pointTo = cloudIn->points[i];
+            Eigen::Vector3f point(cloudIn->points[i].x,
+                                    cloudIn->points[i].y,
+                                    cloudIn->points[i].z);
+            point = q_tIn * point + v_tIn;
+
+            pointTo.x = point.x();
+            pointTo.y = point.y();
+            pointTo.z = point.z();
+
+            cloudOut->push_back(pointTo);
+        }
+        return cloudOut;
+    }
+
+    pcl::PointCloud<PointType>::Ptr transformPointCloud(pcl::PointCloud<PointType>::Ptr cloudIn,
+                                                        const myPointTypePose* const tIn)
+    {
+        pcl::PointCloud<PointType>::Ptr cloudOut(new pcl::PointCloud<PointType>());
+        PointType pointTo;
+
+        // Eigen::AngleAxisf rollAngle(
+        //     Eigen::AngleAxisf(tIn->roll, Eigen::Vector3f::UnitX())
+        // );
+        // Eigen::AngleAxisf pitchAngle(
+        //     Eigen::AngleAxisf(tIn->pitch, Eigen::Vector3f::UnitY())
+        // );
+        // Eigen::AngleAxisf yawAngle(
+        //     Eigen::AngleAxisf(tIn->yaw, Eigen::Vector3f::UnitZ())
+        // ); 
+        Eigen::Quaternionf q_tIn(tIn->qw, tIn->qx, tIn->qy, tIn->qz);
         Eigen::Vector3f v_tIn(tIn->x, tIn->y, tIn->z);
 
         for(int i=0; i<cloudIn->size(); i++)
@@ -590,7 +650,7 @@ mapOptimization():
                 {
                     int thisKeyInd = (int)surroundingKeyPosesDS->points[i].intensity;
                     // 取对应关键帧的优化后的位姿（准备把对应的点云转换到世界坐标系上）
-                    PointTypePose thisTransformation = cloudKeyPoses6D->points[thisKeyInd];
+                    myPointTypePose thisTransformation = cloudKeyPoses6D->points[thisKeyInd];
 
                     // updateTransformPointCloudSinCos(&thisTransformation);
                     surroundingExistingKeyPosesID.   push_back(thisKeyInd);
@@ -973,10 +1033,10 @@ mapOptimization():
         Eigen::AngleAxisf Angle = Eigen::AngleAxisf(Delta_x.block<3, 1>(0, 0).norm(), axis);
         // q_Delta_x = rollAngle*pitchAngle*yawAngle;
         q_Delta_x = Angle;
-        q_transformTobeMapped = q_transformTobeMapped * q_Delta_x;
         v_transformTobeMapped = v_transformTobeMapped + v_Delta_x;
+        q_transformTobeMapped = q_transformTobeMapped * q_Delta_x;
 
-        // std::cout<<iterCount<<"] Delta_x = "<<Delta_x.transpose()<<std::endl;
+        // std::cout<<iterCount<<"] Delta_x = "<<Delta_x.head<3>().transpose()/PI*180<<std::endl;
 
         // transformTobeMapped[0] += Delta_x(0, 0);
         // transformTobeMapped[1] += Delta_x(1, 0);
@@ -984,9 +1044,10 @@ mapOptimization():
         // transformTobeMapped[3] += Delta_x(3, 0);
         // transformTobeMapped[4] += Delta_x(4, 0);
         // transformTobeMapped[5] += Delta_x(5, 0);
-        Eigen::Vector3f tmp = q_transformTobeMapped.toRotationMatrix().eulerAngles(0, 1, 2);
+        
+        Eigen::Vector3f tmp = q_transformTobeMapped.toRotationMatrix().eulerAngles(2, 1, 0);
 
-        std::cout<<"transformTobeMapped[2] : "<<tmp[2]/PI*180<<std::endl;
+        std::cout<<"transformTobeMapped[2] : "<<tmp[0]/PI*180<<std::endl;
 
         // ！！！ 要及时更新transformTobeMapped
         // updateTransformTobeMapped();
@@ -1059,8 +1120,6 @@ mapOptimization():
 
         previousRobotPosPoint = currentRobotPosPoint;
 
-        // Eigen::Matrix<double, 3, 3> q_tmp;
-        // Eigen::Matrix<double, 3, 1> v_tmp;
         // 如果还没有关键帧
         if (cloudKeyPoses3D->points.empty()){
             // static Rot3 	RzRyRx (double x, double y, double z),Rotations around Z, Y, then X axes
@@ -1113,7 +1172,7 @@ mapOptimization():
 		initialEstimate.clear();
 
         PointType thisPose3D;
-        PointTypePose thisPose6D;
+        myPointTypePose thisPose6D;
         Pose3 latestEstimate;
 
         // Compute an estimate from the incomplete linear delta computed during the last update.
@@ -1128,17 +1187,23 @@ mapOptimization():
         thisPose3D.intensity = cloudKeyPoses3D->points.size();
         cloudKeyPoses3D->push_back(thisPose3D);
 
-        // std::cout<<"latestEstimate : "<<latestEstimate.translation().transpose()<<std::endl;
-
         thisPose6D.x = thisPose3D.x;
         thisPose6D.y = thisPose3D.y;
         thisPose6D.z = thisPose3D.z;
         thisPose6D.intensity = thisPose3D.intensity;
-        thisPose6D.roll  = latestEstimate.rotation().roll();
-        thisPose6D.pitch = latestEstimate.rotation().pitch();
-        thisPose6D.yaw   = latestEstimate.rotation().yaw();
+        // thisPose6D.roll  = latestEstimate.rotation().roll();
+        // thisPose6D.pitch = latestEstimate.rotation().pitch();
+        // thisPose6D.yaw   = latestEstimate.rotation().yaw();
+        thisPose6D.qx = latestEstimate.rotation().toQuaternion().x();
+        thisPose6D.qy = latestEstimate.rotation().toQuaternion().y();
+        thisPose6D.qz = latestEstimate.rotation().toQuaternion().z();
+        thisPose6D.qw = latestEstimate.rotation().toQuaternion().w();
         thisPose6D.time = timeLaserOdometry;
         cloudKeyPoses6D->push_back(thisPose6D);
+
+        // std::cout<<"roll : "<<latestEstimate.rotation().roll()<<", ";
+        // std::cout<<"pitch : "<<latestEstimate.rotation().pitch()<<", ";
+        // std::cout<<"yaw : "<<latestEstimate.rotation().yaw()<<std::endl;
 
         // 更新transformAftMapped[]
         // 更新transformAftMapped[]

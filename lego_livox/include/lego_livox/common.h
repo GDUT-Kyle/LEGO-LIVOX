@@ -114,7 +114,7 @@ extern const float th_dist = 0.2;
 
 extern const float DISTANCE_SQ_THRESHOLD = 3.0;
 
-extern const float ext_livox[] = {0.0, 0.0, 0.0, 0.0, 0.00, 0.0};
+extern const float ext_livox[] = {0.0, 0.0, 0.0, 0.0, 0.07, 0.0};
 
 extern const float scanPeriod = 0.1;
 extern const int systemDelay = 0;
@@ -206,6 +206,26 @@ POINT_CLOUD_REGISTER_POINT_STRUCT (PointXYZIRPYT,
 )
 
 typedef PointXYZIRPYT  PointTypePose;
+
+struct PointXYZIQT
+{
+    PCL_ADD_POINT4D
+    PCL_ADD_INTENSITY;
+    float qx;
+    float qy;
+    float qz;
+    float qw;
+    double time;
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+} EIGEN_ALIGN16;
+
+POINT_CLOUD_REGISTER_POINT_STRUCT (PointXYZIQT,
+                                   (float, x, x) (float, y, y)
+                                   (float, z, z) (float, intensity, intensity)
+                                   (float, qx, qx) (float, qy, qy) (float, qz, qz) (float, qw, qw)
+                                   (double, time, time)
+)
+typedef PointXYZIQT  myPointTypePose;
 
 // struct LidarEdgeFactor {
 //   LidarEdgeFactor(Eigen::Vector3d curr_point_, Eigen::Vector3d last_point_a_,

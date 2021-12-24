@@ -3,13 +3,47 @@
 #include "livox_ros_driver/CustomMsg.h"
 #include "lego_livox/common.h"
 
+pcl::PointCloud<pcl::PointXYZRGB>::Ptr laserCloudFullResColor(
+    new pcl::PointCloud<pcl::PointXYZRGB>());
+
 Eigen::Affine3f Ext_Livox = Eigen::Affine3f::Identity();
 
-ros::Publisher pub_pcl_out0, pub_pcl_out1;
+ros::Publisher pub_pcl_out0, pub_pcl_out1, pubLaserCloudFullRes;
 uint64_t TO_MERGE_CNT = 1; 
 constexpr bool b_dbg_line = false;
 // 创建一个循环队列用于存储雷达帧
 std::vector<livox_ros_driver::CustomMsgConstPtr> livox_data;
+
+void RGBpointAssociateToMap(PointType const *const pi,
+                            pcl::PointXYZRGB *const po) {
+  Eigen::Vector3d point_curr(pi->x, pi->y, pi->z);
+  po->x = point_curr.x();
+  po->y = point_curr.y();
+  po->z = point_curr.z();
+  int reflection_map = pi->curvature * 1000;
+  if (reflection_map < 30) {
+    int green = (reflection_map * 255 / 30);
+    po->r = 0;
+    po->g = green & 0xff;
+    po->b = 0xff;
+  } else if (reflection_map < 90) {
+    int blue = (((90 - reflection_map) * 255) / 60);
+    po->r = 0x0;
+    po->g = 0xff;
+    po->b = blue & 0xff;
+  } else if (reflection_map < 150) {
+    int red = ((reflection_map - 90) * 255 / 60);
+    po->r = red & 0xff;
+    po->g = 0xff;
+    po->b = 0x0;
+  } else {
+    int green = (((255 - reflection_map) * 255) / (255 - 150));
+    po->r = 0xff;
+    po->g = green & 0xff;
+    po->b = 0;
+  }
+}
+
 void LivoxMsgCbk1(const livox_ros_driver::CustomMsgConstPtr& livox_msg_in) {
   livox_data.push_back(livox_msg_in);
   // 第一帧则跳过
@@ -59,6 +93,19 @@ void LivoxMsgCbk1(const livox_ros_driver::CustomMsgConstPtr& livox_msg_in) {
   pcl_ros_msg.header.frame_id = "/livox";
   pub_pcl_out1.publish(pcl_ros_msg);
   livox_data.clear();
+
+  laserCloudFullResColor->clear();
+  int laserCloudFullResNum = pcl_in.points.size();
+  for (int i = 0; i < laserCloudFullResNum; i++) {
+    pcl::PointXYZRGB temp_point;
+    RGBpointAssociateToMap(&pcl_in.points[i], &temp_point);
+    laserCloudFullResColor->push_back(temp_point);
+  }
+  sensor_msgs::PointCloud2 laserCloudFullRes3;
+  pcl::toROSMsg(*laserCloudFullResColor, laserCloudFullRes3);
+  laserCloudFullRes3.header.stamp.fromNSec(timebase_ns);
+  laserCloudFullRes3.header.frame_id = "/livox";
+  pubLaserCloudFullRes.publish(laserCloudFullRes3);
 }
 
 int main(int argc, char** argv) {
@@ -79,6 +126,9 @@ int main(int argc, char** argv) {
   ros::Subscriber sub_livox_msg1 = nh.subscribe<livox_ros_driver::CustomMsg>(
       "/livox/lidar", 100, LivoxMsgCbk1);
   pub_pcl_out1 = nh.advertise<sensor_msgs::PointCloud2>("/livox_pcl0", 100);
+
+  pubLaserCloudFullRes =
+      nh.advertise<sensor_msgs::PointCloud2>("/color_livox_pcl0", 100);
 
   ros::spin();
 }
