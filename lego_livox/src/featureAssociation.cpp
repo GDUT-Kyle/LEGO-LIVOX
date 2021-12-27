@@ -122,7 +122,7 @@ private:
     int laserCloudSurfLastNum;
 
     int pointSelCornerInd[N_SCAN*Horizon_SCAN];
-    std::unordered_map<int, std::pair<Eigen::Vector3d, Eigen::Vector3d>> pointSearchCornerInd;
+    std::unordered_map<int, std::pair<Eigen::Vector3f, Eigen::Vector3f>> pointSearchCornerInd;
 
     int pointSelSurfInd[N_SCAN*Horizon_SCAN];
     int pointSearchSurfInd1[N_SCAN*Horizon_SCAN];
@@ -134,11 +134,11 @@ private:
     // odom坐标系下的位姿，是通过帧间匹配积分得到的
     float transformSum[6];
 
-    Eigen::Vector3d v_transformCur;
-    Eigen::AngleAxisd rollAngle;
-    Eigen::AngleAxisd pitchAngle;
-    Eigen::AngleAxisd yawAngle;
-    Eigen::Quaterniond q_transformCur;
+    Eigen::Vector3f v_transformCur;
+    Eigen::AngleAxisf rollAngle;
+    Eigen::AngleAxisf pitchAngle;
+    Eigen::AngleAxisf yawAngle;
+    Eigen::Quaternionf q_transformCur;
 
     float imuRollLast, imuPitchLast, imuYawLast;
     float imuShiftFromStartX, imuShiftFromStartY, imuShiftFromStartZ;
@@ -163,11 +163,11 @@ private:
     tf::StampedTransform laserOdometryTrans;
 
     bool isDegenerate;
-    Eigen::Matrix<double, 3, 3> matP;
+    Eigen::Matrix<float, 3, 3> matP;
 
     int frameCount;
 
-    double lastCost = 0.0;
+    float lastCost = 0.0;
 
 public:
     featureAssociation():
@@ -296,7 +296,7 @@ public:
         laserOdometryTrans.child_frame_id_ = "/livox_odom";
         
         isDegenerate = false;
-        matP = Eigen::Matrix<double, 3, 3>::Zero();
+        matP = Eigen::Matrix<float, 3, 3>::Zero();
 
         frameCount = skipFrameNum;
     }
@@ -622,8 +622,8 @@ public:
     {
         // float s = 10 * (pi->intensity - int(pi->intensity));
         float s = 1.0;
-        Eigen::Vector3d point(pi->x, pi->y, pi->z);
-        point = Eigen::Quaterniond::Identity().slerp(s, q_transformCur) 
+        Eigen::Vector3f point(pi->x, pi->y, pi->z);
+        point = Eigen::Quaternionf::Identity().slerp(s, q_transformCur) 
                 * point + v_transformCur;
         po->x = point.x();
         po->y = point.y();
@@ -640,7 +640,7 @@ public:
         PointType un_point_tmp;
         TransformToStart(pi, &un_point_tmp);
 
-        Eigen::Vector3d un_point(un_point_tmp.x, un_point_tmp.y, un_point_tmp.z);
+        Eigen::Vector3f un_point(un_point_tmp.x, un_point_tmp.y, un_point_tmp.z);
         un_point = q_transformCur.inverse() * (un_point - v_transformCur);
 
         po->x = un_point.x();
@@ -696,7 +696,7 @@ public:
         //     line_point_Cloud->clear();
         // }
         // std::cout<<v_transformCur.transpose()<<std::endl;
-        double maxDis = 0.0;
+        float maxDis = 0.0;
         for (int i = 0; i < surfPointsFlatNum; i++) {
             // 坐标变换到开始时刻，参数0是输入，参数1是输出,校正运动畸变
             TransformToStart(&surfPointsFlat->points[i], &pointSel);
@@ -706,9 +706,9 @@ public:
             {
                 // k点最近邻搜索，这里k=1
                 kdtreeSurfLast->radiusSearch(pointSel, 5, pointSearchInd, pointSearchSqDis);
-                Eigen::Matrix<double, 5, 3> matA0;
-                Eigen::Matrix<double, 5, 1> matB0 = 
-                    -1 * Eigen::Matrix<double, 5, 1>::Ones();
+                Eigen::Matrix<float, 5, 3> matA0;
+                Eigen::Matrix<float, 5, 1> matB0 = 
+                    -1 * Eigen::Matrix<float, 5, 1>::Ones();
                 if(pointSearchSqDis[4] < DISTANCE_SQ_THRESHOLD)
                 {
                     // 找到5个近邻点组成的平面
@@ -726,8 +726,8 @@ public:
                         matA0(j, 2) = laserCloudSurfLast->points[pointSearchInd[j]].z;
                     }
                     // 计算平面的法向量
-                    Eigen::Vector3d norm = matA0.colPivHouseholderQr().solve(matB0);
-                    double negative_OA_dot_norm = 1/norm.norm();
+                    Eigen::Vector3f norm = matA0.colPivHouseholderQr().solve(matB0);
+                    float negative_OA_dot_norm = 1/norm.norm();
                     norm.normalize(); // 归一化
 
                     // 将5个近邻点代入方程，验证
@@ -735,7 +735,7 @@ public:
                     for(int j=0; j<5; j++)
                     {
                         // if OX * n > 0.2, then plane is not fit well
-                        double ox_n = fabs(norm(0)*laserCloudSurfLast->points[pointSearchInd[j]].x+
+                        float ox_n = fabs(norm(0)*laserCloudSurfLast->points[pointSearchInd[j]].x+
                                             norm(1)*laserCloudSurfLast->points[pointSearchInd[j]].y+
                                             norm(2)*laserCloudSurfLast->points[pointSearchInd[j]].z + 
                                             negative_OA_dot_norm);
@@ -770,28 +770,28 @@ public:
                 tripod2 = laserCloudSurfLast->points[pointSearchSurfInd2[i]];
                 tripod3 = laserCloudSurfLast->points[pointSearchSurfInd3[i]];
 
-                Eigen::Vector3d tmp_a(tripod1.x, tripod1.y, tripod1.z);
-                Eigen::Vector3d tmp_b(tripod2.x, tripod2.y, tripod2.z);
-                Eigen::Vector3d tmp_c(tripod3.x, tripod3.y, tripod3.z);
+                Eigen::Vector3f tmp_a(tripod1.x, tripod1.y, tripod1.z);
+                Eigen::Vector3f tmp_b(tripod2.x, tripod2.y, tripod2.z);
+                Eigen::Vector3f tmp_c(tripod3.x, tripod3.y, tripod3.z);
 
-                Eigen::Vector3d tmp_p(pointSel.x, pointSel.y, pointSel.z);
+                Eigen::Vector3f tmp_p(pointSel.x, pointSel.y, pointSel.z);
 
-                Eigen::Vector3d ld = (tmp_b - tmp_a).cross(tmp_c - tmp_a); // 平面法向量
+                Eigen::Vector3f ld = (tmp_b - tmp_a).cross(tmp_c - tmp_a); // 平面法向量
                 ld.normalize();
                 // 确保方向向量是由面指向点
                 // if(ld.dot(tmp_a - tmp_p)>0)
                 //     ld = -ld;
 
                 // 距离不要取绝对值
-                double pd2 = ld.dot(tmp_p - tmp_a);
+                float pd2 = ld.dot(tmp_p - tmp_a);
                 // if(pd2 > 0.1 || pd2 < -0.1) continue;
                 // maxDis += pd2;
 
                 // std::cout<<"pd2 = "<<pd2<<", ";
 
-                double pa = ld.x();
-                double pb = ld.y();
-                double pc = ld.z();
+                float pa = ld.x();
+                float pb = ld.y();
+                float pc = ld.z();
 
                 // if(pd2 > (10 * maxDis) && i>0)
                 //     break;
@@ -840,11 +840,11 @@ public:
                 // 确保搜索点足够近
                 if(pointSearchSqDis[4] < DISTANCE_SQ_THRESHOLD)
                 {
-                    std::vector<Eigen::Vector3d> nearCorners;
-                    Eigen::Vector3d center(0.0, 0.0, 0.0);
+                    std::vector<Eigen::Vector3f> nearCorners;
+                    Eigen::Vector3f center(0.0, 0.0, 0.0);
                     for(int j=0; j<5; j++)
                     {
-                        Eigen::Vector3d tmp(
+                        Eigen::Vector3f tmp(
                             laserCloudCornerLast->points[pointSearchInd[j]].x,
                             laserCloudCornerLast->points[pointSearchInd[j]].y,
                             laserCloudCornerLast->points[pointSearchInd[j]].z
@@ -854,28 +854,28 @@ public:
                     }
                     center = center / 5.0;
 
-                    Eigen::Matrix3d covMat = Eigen::Matrix3d::Zero();
+                    Eigen::Matrix3f covMat = Eigen::Matrix3f::Zero();
                     for(int j=0; j<5; j++)
                     {
-                        Eigen::Vector3d tmpZeroMean = 
+                        Eigen::Vector3f tmpZeroMean = 
                             nearCorners[j] - center;
                         covMat = covMat + tmpZeroMean * tmpZeroMean.transpose();
                     }
 
                     // SVD分解协方差，如果最大特征值远大于其余两个特征值，说明分布成直线
                     // 最大特征值对应特征向量即为直线的方向
-                    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> saes(covMat);
+                    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> saes(covMat);
                     // note Eigen library sort eigenvalues in increasing order
-                    Eigen::Vector3d unit_direction = saes.eigenvectors().col(2);
+                    Eigen::Vector3f unit_direction = saes.eigenvectors().col(2);
                     if(saes.eigenvalues()[2] > 3 * saes.eigenvalues()[1])
                     {
                         // 根据直线方向和中心点，在直线上找两个点
-                        Eigen::Vector3d point_on_line = center;
+                        Eigen::Vector3f point_on_line = center;
                         // 提取到的直线上的两个点，用于确定方向
-                        Eigen::Vector3d last_point_a, last_point_b;
+                        Eigen::Vector3f last_point_a, last_point_b;
                         last_point_a = 0.1 * unit_direction + point_on_line;
                         last_point_b = -0.1 * unit_direction + point_on_line; 
-                        pointSearchCornerInd[i] = std::pair<Eigen::Vector3d, Eigen::Vector3d>(last_point_a, last_point_b);
+                        pointSearchCornerInd[i] = std::pair<Eigen::Vector3f, Eigen::Vector3f>(last_point_a, last_point_b);
 
                         // if(iterCount % 5 == 0)
                         // {pointSel.intensity = i;
@@ -896,17 +896,17 @@ public:
             if(pointSearchCornerInd.find(i) != pointSearchCornerInd.end())
             {
                 //选择的特征点记为O，kd-tree最近距离点记为A，另一个最近距离点记为B
-                Eigen::Vector3d tmp_a;
-                Eigen::Vector3d tmp_b;
+                Eigen::Vector3f tmp_a;
+                Eigen::Vector3f tmp_b;
                 tmp_a = pointSearchCornerInd[i].first;
                 tmp_b = pointSearchCornerInd[i].second;
 
-                Eigen::Vector3d tmp_c = 0.5*(tmp_a + tmp_b);
-                Eigen::Vector3d tmp_p(pointSel.x, pointSel.y, pointSel.z);
+                Eigen::Vector3f tmp_c = 0.5*(tmp_a + tmp_b);
+                Eigen::Vector3f tmp_p(pointSel.x, pointSel.y, pointSel.z);
                 // 计算点线距离
-                Eigen::Matrix<double, 3, 1> nu = (tmp_p - tmp_a).cross(tmp_p - tmp_b); //(叉乘)
-                Eigen::Matrix<double, 3, 1> de = tmp_a - tmp_b;
-                Eigen::Matrix<double, 3, 1> ld = de.cross(nu);
+                Eigen::Matrix<float, 3, 1> nu = (tmp_p - tmp_a).cross(tmp_p - tmp_b); //(叉乘)
+                Eigen::Matrix<float, 3, 1> de = tmp_a - tmp_b;
+                Eigen::Matrix<float, 3, 1> ld = de.cross(nu);
 
                 // if(ld.dot(tmp_a - tmp_p)>0)
                 //     ld = -ld;
@@ -943,23 +943,29 @@ public:
 
     void updateTransformCur()
     {
-        v_transformCur =  Eigen::Vector3d(transformCur[3], transformCur[4], transformCur[5]);
-        rollAngle = Eigen::AngleAxisd(transformCur[0], Eigen::Vector3d::UnitX());
-        pitchAngle = Eigen::AngleAxisd(transformCur[1], Eigen::Vector3d::UnitY());
-        yawAngle = Eigen::AngleAxisd(transformCur[2], Eigen::Vector3d::UnitZ());
+        v_transformCur =  Eigen::Vector3f(transformCur[3], transformCur[4], transformCur[5]);
+        rollAngle = Eigen::AngleAxisf(transformCur[0], Eigen::Vector3f::UnitX());
+        pitchAngle = Eigen::AngleAxisf(transformCur[1], Eigen::Vector3f::UnitY());
+        yawAngle = Eigen::AngleAxisf(transformCur[2], Eigen::Vector3f::UnitZ());
+        // Eigen::AngleAxisf Angle = Eigen::AngleAxisf(
+        //     sqrt(transformCur[0]*transformCur[0] + 
+        //         transformCur[1]*transformCur[1] + 
+        //         transformCur[2]*transformCur[2])
+        //     , Eigen::Vector3f(transformCur[0], transformCur[1], transformCur[2]));
         q_transformCur = rollAngle * pitchAngle * yawAngle;
+        // q_transformCur = Angle;
     }
 
     bool calculateTransformationSurf(int iterCount){
 
         {
-        // // Eigen::Vector3d sum = Eigen::Vector3d::Zero();
-        // // Eigen::Vector3d mean = Eigen::Vector3d::Zero();
-        // // Eigen::Matrix3d cov = Eigen::Matrix3d::Zero();
-        // // Eigen::Vector3d matE = Eigen::Vector3d::Zero();
-        // // Eigen::Vector3d matV = Eigen::Vector3d::Zero();
-        // // Eigen::Matrix3d H = Eigen::Matrix3d::Zero();
-        // // Eigen::Vector3d b = Eigen::Vector3d::Zero();
+        // // Eigen::Vector3f sum = Eigen::Vector3f::Zero();
+        // // Eigen::Vector3f mean = Eigen::Vector3f::Zero();
+        // // Eigen::Matrix3f cov = Eigen::Matrix3f::Zero();
+        // // Eigen::Vector3f matE = Eigen::Vector3f::Zero();
+        // // Eigen::Vector3f matV = Eigen::Vector3f::Zero();
+        // // Eigen::Matrix3f H = Eigen::Matrix3f::Zero();
+        // // Eigen::Vector3f b = Eigen::Vector3f::Zero();
         // Eigen::Matrix3f cov;
         // Eigen::Vector4f pc_mean1;
         // Eigen::Vector4f pc_mean2;
@@ -999,13 +1005,13 @@ public:
 
         int pointSelNum = laserCloudOri->points.size();
 
-        Eigen::Vector3d v_pointOri_bk1;
+        Eigen::Vector3f v_pointOri_bk1;
 
-        Eigen::Matrix3d H = Eigen::Matrix3d::Zero();
-        Eigen::Vector3d b = Eigen::Vector3d::Zero();
-        double cost = 0.0;
+        Eigen::Matrix3f H = Eigen::Matrix3f::Zero();
+        Eigen::Vector3f b = Eigen::Vector3f::Zero();
+        float cost = 0.0;
 
-        Eigen::Vector3d Delta_x = Eigen::Vector3d::Zero();
+        Eigen::Vector3f Delta_x = Eigen::Vector3f::Zero();
 
         for(int i=0; i<pointSelNum; i++)
         {
@@ -1021,22 +1027,22 @@ public:
             // v_pointOri_bk = q_transformCur.inverse() * v_pointOri_bk1 - v_transformCur;
             
             // 2. dD/dG = (la, lb, lc)
-            Eigen::Matrix<double, 1, 3> dDdG;
+            Eigen::Matrix<float, 1, 3> dDdG;
             dDdG << coeff.x, coeff.y, coeff.z;
             // 3. 将transformCur转成R，然后计算(-Rp)^
-            Eigen::Matrix3d neg_Rp_sym;
+            Eigen::Matrix3f neg_Rp_sym;
             anti_symmetric(-q_transformCur.toRotationMatrix()*v_pointOri_bk1, neg_Rp_sym);
             // 4. 计算(dD/dG)*(-Rp)^得到关于旋转的雅克比，取其中的yaw部分，记为j_yaw
-            Eigen::Matrix<double, 1, 3> dDdR = dDdG * neg_Rp_sym;
+            Eigen::Matrix<float, 1, 3> dDdR = dDdG * neg_Rp_sym;
             // 5. 计算关于平移的雅克比，即为(dD/dG)，取其中的x,y部分，记为j_x,j_y
             // 6. 组织该点的雅克比：[j_yaw,j_x,j_y]
-            Eigen::Matrix<double, 1, 3> j_n;
+            Eigen::Matrix<float, 1, 3> j_n;
             j_n(0, 0) = dDdR(0, 0);
             j_n(0, 1) = dDdR(0, 1);
             j_n(0, 2) = dDdG(0, 2);
             
             // 7. 该点的残差值,f(x)=coeff.intensity
-            double f_n = 0.05 * coeff.intensity;
+            float f_n = 0.05 * coeff.intensity;
             // 8. 组织近似海森矩阵H += J^T*J
             H = H + j_n.transpose() * j_n;
             // 9. 组织方程右边：b += -J^T*f(x)
@@ -1052,13 +1058,13 @@ public:
         // 如果是第一次求解
         if(iterCount == 0)
         {
-            Eigen::Matrix<double, 1, 3> matE = Eigen::Matrix<double, 1, 3>::Zero();
-            Eigen::Matrix<double, 3, 3> matV = Eigen::Matrix<double, 3, 3>::Zero();
-            Eigen::Matrix<double, 3, 3> matV2 = Eigen::Matrix<double, 3, 3>::Zero();
+            Eigen::Matrix<float, 1, 3> matE = Eigen::Matrix<float, 1, 3>::Zero();
+            Eigen::Matrix<float, 3, 3> matV = Eigen::Matrix<float, 3, 3>::Zero();
+            Eigen::Matrix<float, 3, 3> matV2 = Eigen::Matrix<float, 3, 3>::Zero();
 
             // 计算At*A的特征值和特征向量
             // 特征值存放在matE，特征向量matV
-            Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigenSolver(H);
+            Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> eigenSolver(H);
             matE = eigenSolver.eigenvalues();
             matV = eigenSolver.eigenvectors();
 
@@ -1082,7 +1088,7 @@ public:
         }
 
         if (isDegenerate) {
-            Eigen::Matrix<double, 3, 1> matX2 = Eigen::Matrix<double, 3, 1>::Zero();
+            Eigen::Matrix<float, 3, 1> matX2 = Eigen::Matrix<float, 3, 1>::Zero();
             // matX.copyTo(matX2);
             matX2 = Delta_x;
             Delta_x = matP * matX2;
@@ -1122,14 +1128,14 @@ public:
     bool calculateTransformationCorner(int iterCount){
         int pointSelNum = laserCloudOri->points.size();
 
-        Eigen::Vector3d v_pointOri_bk1;
+        Eigen::Vector3f v_pointOri_bk1;
 
-        Eigen::Matrix<double, 1, 3> j_n;
-        Eigen::Matrix3d H = Eigen::Matrix3d::Zero();
-        Eigen::Vector3d b = Eigen::Vector3d::Zero();
-        double cost = 0.0;
+        Eigen::Matrix<float, 1, 3> j_n;
+        Eigen::Matrix3f H = Eigen::Matrix3f::Zero();
+        Eigen::Vector3f b = Eigen::Vector3f::Zero();
+        float cost = 0.0;
 
-        Eigen::Vector3d Delta_x = Eigen::Vector3d::Zero();
+        Eigen::Vector3f Delta_x = Eigen::Vector3f::Zero();
 
         for(int i=0; i<pointSelNum; i++)
         {
@@ -1145,13 +1151,13 @@ public:
             // v_pointOri_bk = q_transformCur.inverse() * v_pointOri_bk1 - v_transformCur;
             
             // 2. dD/dG = (la, lb, lc)
-            Eigen::Matrix<double, 1, 3> dDdG;
+            Eigen::Matrix<float, 1, 3> dDdG;
             dDdG << coeff.x, coeff.y, coeff.z;
             // 3. 将transformCur转成R，然后计算(-Rp)^
-            Eigen::Matrix3d neg_Rp_sym;
+            Eigen::Matrix3f neg_Rp_sym;
             anti_symmetric(-q_transformCur.toRotationMatrix()*v_pointOri_bk1, neg_Rp_sym);
             // 4. 计算(dD/dG)*(-Rp)^得到关于旋转的雅克比，取其中的yaw部分，记为j_yaw
-            Eigen::Matrix<double, 1, 3> dDdR = dDdG * neg_Rp_sym;
+            Eigen::Matrix<float, 1, 3> dDdR = dDdG * neg_Rp_sym;
             // 5. 计算关于平移的雅克比，即为(dD/dG)，取其中的x,y部分，记为j_x,j_y
             // 6. 组织该点的雅克比：[j_yaw,j_x,j_y]
             j_n(0, 0) = dDdR(0, 2);
@@ -1159,7 +1165,7 @@ public:
             j_n(0, 2) = dDdG(0, 1);
             
             // 7. 该点的残差值,f(x)=coeff.intensity
-            double f_n = 0.05 * coeff.intensity;
+            float f_n = 0.05 * coeff.intensity;
             // 8. 组织近似海森矩阵H += J^T*J
             H = H + j_n.transpose() * j_n;
             // 9. 组织方程右边：b += -J^T*f(x)
@@ -1174,13 +1180,13 @@ public:
 
         if(iterCount == 0)
         {
-            Eigen::Matrix<double, 1, 3> matE = Eigen::Matrix<double, 1, 3>::Zero();
-            Eigen::Matrix<double, 3, 3> matV = Eigen::Matrix<double, 3, 3>::Zero();
-            Eigen::Matrix<double, 3, 3> matV2 = Eigen::Matrix<double, 3, 3>::Zero();
+            Eigen::Matrix<float, 1, 3> matE = Eigen::Matrix<float, 1, 3>::Zero();
+            Eigen::Matrix<float, 3, 3> matV = Eigen::Matrix<float, 3, 3>::Zero();
+            Eigen::Matrix<float, 3, 3> matV2 = Eigen::Matrix<float, 3, 3>::Zero();
 
             // 计算At*A的特征值和特征向量
             // 特征值存放在matE，特征向量matV
-            Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigenSolver(H);
+            Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> eigenSolver(H);
             matE = eigenSolver.eigenvalues();
             matV = eigenSolver.eigenvectors();
 
@@ -1204,7 +1210,7 @@ public:
         }
 
         if (isDegenerate) {
-            Eigen::Matrix<double, 3, 1> matX2 = Eigen::Matrix<double, 3, 1>::Zero();
+            Eigen::Matrix<float, 3, 1> matX2 = Eigen::Matrix<float, 3, 1>::Zero();
             // matX.copyTo(matX2);
             matX2 = Delta_x;
             Delta_x = matP * matX2;
@@ -1361,25 +1367,32 @@ public:
         // AccumulateRotation作用
         // 将计算的两帧之间的位姿“累加”起来，获得相对于第一帧的旋转矩阵
         // transformSum + (-transformCur) =(rx,ry,rz)
-        Eigen::AngleAxisd rollAngle(
-            Eigen::AngleAxisd(transformSum[0], Eigen::Vector3d::UnitX())
+        Eigen::AngleAxisf rollAngle(
+            Eigen::AngleAxisf(transformSum[0], Eigen::Vector3f::UnitX())
         );
-        Eigen::AngleAxisd pitchAngle(
-            Eigen::AngleAxisd(transformSum[1], Eigen::Vector3d::UnitY())
+        Eigen::AngleAxisf pitchAngle(
+            Eigen::AngleAxisf(transformSum[1], Eigen::Vector3f::UnitY())
         );
-        Eigen::AngleAxisd yawAngle(
-            Eigen::AngleAxisd(transformSum[2], Eigen::Vector3d::UnitZ())
+        Eigen::AngleAxisf yawAngle(
+            Eigen::AngleAxisf(transformSum[2], Eigen::Vector3f::UnitZ())
         ); 
-        Eigen::Quaterniond q_transformSum;
+        // Eigen::AngleAxisf Angle = Eigen::AngleAxisf(
+        //     sqrt(transformSum[0]*transformSum[0] + 
+        //         transformSum[1]*transformSum[1] + 
+        //         transformSum[2]*transformSum[2]),
+        //     Eigen::Vector3f(transformSum[0], transformSum[1], transformSum[2])
+        // );
+        Eigen::Quaternionf q_transformSum;
         q_transformSum = rollAngle * pitchAngle * yawAngle;
+        // q_transformSum = Angle;
 
-        Eigen::Vector3d v_transformSum(transformSum[3], transformSum[4], transformSum[5]);
-        // v_transformCur = Eigen::Vector3d(-transformCur[3], -transformCur[4], -transformCur[5]);
+        Eigen::Vector3f v_transformSum(transformSum[3], transformSum[4], transformSum[5]);
+        // v_transformCur = Eigen::Vector3f(-transformCur[3], -transformCur[4], -transformCur[5]);
         v_transformSum = v_transformSum + q_transformSum * v_transformCur;
 
         q_transformSum = q_transformSum * q_transformCur;
 
-        Eigen::Vector3d e_transformSum = q_transformSum.toRotationMatrix().eulerAngles(0, 1, 2);
+        Eigen::Vector3f e_transformSum = q_transformSum.toRotationMatrix().eulerAngles(0, 1, 2);
 
         // tx = v_transformSum.x();
         // ty = v_transformSum.y();

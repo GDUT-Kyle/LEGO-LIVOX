@@ -35,6 +35,7 @@ private:
     // pcl::PointCloud<PointType>::Ptr outlierCloud; //在分割时出现的异常
     pcl::PointCloud<PointType>::Ptr groundCloudSeeds; //地面点云
 
+    #ifdef IS_CLUSTERS
     pcl::search::KdTree<PointType>::Ptr tree;
     // pcl::KdTreeFLANN<PointType>::Ptr tree;
     std::vector<pcl::PointCloud<PointType>> clusters;//保存分割后的所有类 每一类为一个点云
@@ -44,6 +45,7 @@ private:
 	int maxsize = 3000;
 	std::vector<pcl::PointIndices> clusterIndices;// 创建索引类型对象
 	pcl::EuclideanClusterExtraction<PointType> ec; // 欧式聚类对象
+    #endif
 
 
     PointType nanPoint;
@@ -148,11 +150,13 @@ public:
         queueIndX = new uint16_t[N_SCAN*Horizon_SCAN];
         queueIndY = new uint16_t[N_SCAN*Horizon_SCAN];
 
+        #ifdef IS_CLUSTERS
         tree.reset(new pcl::search::KdTree<PointType>);
         // tree.reset(new pcl::KdTreeFLANN<PointType>);
         ec.setClusterTolerance(clusterTolerance);//设置近邻搜索半径
         ec.setMinClusterSize(minsize);//设置一个类需要的最小的点数
         ec.setMaxClusterSize(maxsize);//设置一个类需要的最大的点数
+        #endif
 
         pc_height.resize(N_SCAN*Horizon_SCAN);
 
@@ -521,6 +525,7 @@ void estimate_plane_(void){
     }
 
     void labelComponents(){
+        #ifdef IS_CLUSTERS
         clusterIndices.clear();
         clusters.clear();
 
@@ -587,6 +592,7 @@ void estimate_plane_(void){
         }
         pubMarkerArray.publish(costCubes);
         // std::cout<<"clusters size : "<<clusters.size()<<std::endl;
+        #endif
     }
 
     // 发布各类点云内容

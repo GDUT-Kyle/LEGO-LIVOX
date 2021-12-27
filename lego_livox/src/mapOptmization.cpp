@@ -62,6 +62,8 @@ private:
     
     PointType previousRobotPosPoint;
     PointType currentRobotPosPoint;
+    Eigen::Quaternionf previousRobotAttPoint;
+    Eigen::Quaternionf currentRobotAttPoint;
 
     // PointType(pcl::PointXYZI)的XYZI分别保存3个方向上的平移和一个索引(cloudKeyPoses3D->points.size())
     pcl::PointCloud<PointType>::Ptr cloudKeyPoses3D;
@@ -441,7 +443,7 @@ mapOptimization():
         // std::cout<<"v_transformIncre : "<<v_transformIncre.transpose()<<std::endl;
 
         // 遵守先平移后旋转的规矩
-        v_transformTobeMapped = v_transformAftMapped + q_transformTobeMapped * v_transformIncre;
+        v_transformTobeMapped = v_transformAftMapped + q_transformAftMapped * v_transformIncre;
         q_transformTobeMapped = q_transformAftMapped * q_transformIncre;
 
         // transformTobeMapped[3] = v_transformTobeMapped[0];
@@ -696,10 +698,14 @@ mapOptimization():
 
         laserCloudSurfTotalLast->clear();
         laserCloudSurfTotalLastDS->clear();
-        *laserCloudSurfTotalLast += *laserCloudSurfLastDS;
-        downSizeFilterSurf.setInputCloud(laserCloudSurfTotalLast);
-        downSizeFilterSurf.filter(*laserCloudSurfTotalLastDS);
+        // *laserCloudSurfTotalLast = *laserCloudSurfLastDS;
+        *laserCloudSurfTotalLastDS = *laserCloudSurfLastDS;
+        // downSizeFilterSurf.setInputCloud(laserCloudSurfTotalLast);
+        // downSizeFilterSurf.filter(*laserCloudSurfTotalLastDS);
         laserCloudSurfTotalLastDSNum = laserCloudSurfTotalLastDS->points.size();
+
+        // std::cout<<"laserCloudCornerLastDSNum : "<<laserCloudCornerLastDSNum<<", ";
+        // std::cout<<"laserCloudSurfTotalLastDSNum : "<<laserCloudSurfTotalLastDSNum<<std::endl;
     }
 
     void transformUpdate()
@@ -904,8 +910,8 @@ mapOptimization():
                     // maxDis = std::max(maxDis, pd2);
                     float s;
                     // 加上影响因子
-                    s = 1 - 0.9 * fabs(pd2)/ sqrt(sqrt(pointSel.x * pointSel.x
-                            + pointSel.y * pointSel.y + pointSel.z * pointSel.z));
+                    s = 1 - 0.9 * fabs(pd2)/*/ sqrt(sqrt(pointSel.x * pointSel.x
+                            + pointSel.y * pointSel.y + pointSel.z * pointSel.z))*/;
 
                     if (s > 0.1) {
                         // [x,y,z]是整个平面的单位法量
@@ -1022,17 +1028,17 @@ mapOptimization():
         v_Delta_x[0] = Delta_x(3, 0);
         v_Delta_x[1] = Delta_x(4, 0);
         v_Delta_x[2] = Delta_x(5, 0);
-        // Eigen::AngleAxisf rollAngle = Eigen::AngleAxisf(Delta_x(0, 0), 
-        //                                                 Eigen::Vector3f::UnitX());
-        // Eigen::AngleAxisf pitchAngle = Eigen::AngleAxisf(Delta_x(1, 0), 
-        //                                                 Eigen::Vector3f::UnitY());
-        // Eigen::AngleAxisf yawAngle = Eigen::AngleAxisf(Delta_x(2, 0), 
-        //                                                 Eigen::Vector3f::UnitZ());
-        Eigen::Vector3f axis = Delta_x.block<3, 1>(0, 0);
-        axis.normalize();
-        Eigen::AngleAxisf Angle = Eigen::AngleAxisf(Delta_x.block<3, 1>(0, 0).norm(), axis);
-        // q_Delta_x = rollAngle*pitchAngle*yawAngle;
-        q_Delta_x = Angle;
+        Eigen::AngleAxisf rollAngle = Eigen::AngleAxisf(Delta_x(0, 0), 
+                                                        Eigen::Vector3f::UnitX());
+        Eigen::AngleAxisf pitchAngle = Eigen::AngleAxisf(Delta_x(1, 0), 
+                                                        Eigen::Vector3f::UnitY());
+        Eigen::AngleAxisf yawAngle = Eigen::AngleAxisf(Delta_x(2, 0), 
+                                                        Eigen::Vector3f::UnitZ());
+        // Eigen::Vector3f axis = Delta_x.block<3, 1>(0, 0);
+        // axis.normalize();
+        // Eigen::AngleAxisf Angle = Eigen::AngleAxisf(Delta_x.block<3, 1>(0, 0).norm(), axis);
+        q_Delta_x = rollAngle*pitchAngle*yawAngle;
+        // q_Delta_x = Angle;
         v_transformTobeMapped = v_transformTobeMapped + v_Delta_x;
         q_transformTobeMapped = q_transformTobeMapped * q_Delta_x;
 
@@ -1045,9 +1051,9 @@ mapOptimization():
         // transformTobeMapped[4] += Delta_x(4, 0);
         // transformTobeMapped[5] += Delta_x(5, 0);
         
-        Eigen::Vector3f tmp = q_transformTobeMapped.toRotationMatrix().eulerAngles(2, 1, 0);
+        // Eigen::Vector3f tmp = q_transformTobeMapped.toRotationMatrix().eulerAngles(2, 1, 0);
 
-        std::cout<<"transformTobeMapped[2] : "<<tmp[0]/PI*180<<std::endl;
+        // std::cout<<"transformTobeMapped[2] : "<<tmp[0]/PI*180<<std::endl;
 
         // ！！！ 要及时更新transformTobeMapped
         // updateTransformTobeMapped();
@@ -1106,6 +1112,17 @@ mapOptimization():
         currentRobotPosPoint.y = v_transformAftMapped[1];
         currentRobotPosPoint.z = v_transformAftMapped[2];
 
+        Eigen::Vector3f e_transformAftMapped;
+        e_transformAftMapped = 
+                (previousRobotAttPoint.inverse()*q_transformAftMapped).toRotationMatrix().eulerAngles(0, 1, 2);
+        if(fabs(e_transformAftMapped[0]) > 1.57)
+            e_transformAftMapped[0] = fabs(fabs(e_transformAftMapped[0])-PI);
+        if(fabs(e_transformAftMapped[1]) > 1.57)
+            e_transformAftMapped[1] = fabs(fabs(e_transformAftMapped[1])-PI);
+        if(fabs(e_transformAftMapped[2]) > 1.57)
+            e_transformAftMapped[2] = fabs(fabs(e_transformAftMapped[2])-PI);
+        // std::cout<<"e_transformAftMapped : "<<e_transformAftMapped.sum()<<std::endl;
+
         // 如果两次优化之间欧式距离<0.3，则不保存，不作为关键帧
         bool saveThisKeyFrame = true;
         if (sqrt((previousRobotPosPoint.x-currentRobotPosPoint.x)*(previousRobotPosPoint.x-currentRobotPosPoint.x)
@@ -1114,11 +1131,15 @@ mapOptimization():
             saveThisKeyFrame = false;
         }
 
+        if(e_transformAftMapped.sum() > 0.17)
+            saveThisKeyFrame = true;
+
         // 非关键帧 并且 非空，直接返回
         if (saveThisKeyFrame == false && !cloudKeyPoses3D->points.empty())
         	return;
 
         previousRobotPosPoint = currentRobotPosPoint;
+        previousRobotAttPoint = q_transformAftMapped;
 
         // 如果还没有关键帧
         if (cloudKeyPoses3D->points.empty()){

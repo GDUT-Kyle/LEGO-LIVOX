@@ -94,18 +94,21 @@ void LivoxMsgCbk1(const livox_ros_driver::CustomMsgConstPtr& livox_msg_in) {
   pub_pcl_out1.publish(pcl_ros_msg);
   livox_data.clear();
 
-  laserCloudFullResColor->clear();
-  int laserCloudFullResNum = pcl_in.points.size();
-  for (int i = 0; i < laserCloudFullResNum; i++) {
-    pcl::PointXYZRGB temp_point;
-    RGBpointAssociateToMap(&pcl_in.points[i], &temp_point);
-    laserCloudFullResColor->push_back(temp_point);
+  if(pubLaserCloudFullRes.getNumSubscribers() != 0)
+  {
+    laserCloudFullResColor->clear();
+    int laserCloudFullResNum = pcl_in.points.size();
+    for (int i = 0; i < laserCloudFullResNum; i++) {
+      pcl::PointXYZRGB temp_point;
+      RGBpointAssociateToMap(&pcl_in.points[i], &temp_point);
+      laserCloudFullResColor->push_back(temp_point);
+    }
+    sensor_msgs::PointCloud2 laserCloudFullRes3;
+    pcl::toROSMsg(*laserCloudFullResColor, laserCloudFullRes3);
+    laserCloudFullRes3.header.stamp.fromNSec(timebase_ns);
+    laserCloudFullRes3.header.frame_id = "/livox";
+    pubLaserCloudFullRes.publish(laserCloudFullRes3);
   }
-  sensor_msgs::PointCloud2 laserCloudFullRes3;
-  pcl::toROSMsg(*laserCloudFullResColor, laserCloudFullRes3);
-  laserCloudFullRes3.header.stamp.fromNSec(timebase_ns);
-  laserCloudFullRes3.header.frame_id = "/livox";
-  pubLaserCloudFullRes.publish(laserCloudFullRes3);
 }
 
 int main(int argc, char** argv) {
