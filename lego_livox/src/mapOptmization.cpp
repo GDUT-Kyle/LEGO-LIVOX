@@ -457,70 +457,6 @@ mapOptimization():
         // 后面记得更新transformBefMapped
     }
 
-    void updateTransformTobeMapped()
-    {
-        v_transformTobeMapped =  Eigen::Vector3f(transformTobeMapped[3], 
-                                                transformTobeMapped[4], 
-                                                transformTobeMapped[5]);
-        Eigen::AngleAxisf rollAngle = Eigen::AngleAxisf(transformTobeMapped[0], 
-                                                        Eigen::Vector3f::UnitX());
-        Eigen::AngleAxisf pitchAngle = Eigen::AngleAxisf(transformTobeMapped[1], 
-                                                        Eigen::Vector3f::UnitY());
-        Eigen::AngleAxisf yawAngle = Eigen::AngleAxisf(transformTobeMapped[2], 
-                                                        Eigen::Vector3f::UnitZ());
-        q_transformTobeMapped = rollAngle * pitchAngle * yawAngle;
-    }
-
-    void updateTransformTobeMapped_()
-    {
-        // v_transformTobeMapped =  Eigen::Vector3f(transformTobeMapped[3], 
-        //                                         transformTobeMapped[4], 
-        //                                         transformTobeMapped[5]);
-        // Eigen::AngleAxisf rollAngle = Eigen::AngleAxisf(transformTobeMapped[0], 
-        //                                                 Eigen::Vector3f::UnitX());
-        // Eigen::AngleAxisf pitchAngle = Eigen::AngleAxisf(transformTobeMapped[1], 
-        //                                                 Eigen::Vector3f::UnitY());
-        // Eigen::AngleAxisf yawAngle = Eigen::AngleAxisf(transformTobeMapped[2], 
-        //                                                 Eigen::Vector3f::UnitZ());
-        // q_transformTobeMapped = rollAngle * pitchAngle * yawAngle;
-    }
-
-    pcl::PointCloud<PointType>::Ptr transformPointCloud(pcl::PointCloud<PointType>::Ptr cloudIn,
-                                                        const PointTypePose* const tIn)
-    {
-        pcl::PointCloud<PointType>::Ptr cloudOut(new pcl::PointCloud<PointType>());
-        PointType pointTo;
-
-        Eigen::AngleAxisf rollAngle(
-            Eigen::AngleAxisf(tIn->roll, Eigen::Vector3f::UnitX())
-        );
-        Eigen::AngleAxisf pitchAngle(
-            Eigen::AngleAxisf(tIn->pitch, Eigen::Vector3f::UnitY())
-        );
-        Eigen::AngleAxisf yawAngle(
-            Eigen::AngleAxisf(tIn->yaw, Eigen::Vector3f::UnitZ())
-        ); 
-        Eigen::Quaternionf q_tIn;
-        q_tIn = rollAngle * pitchAngle * yawAngle;
-        Eigen::Vector3f v_tIn(tIn->x, tIn->y, tIn->z);
-
-        for(int i=0; i<cloudIn->size(); i++)
-        {
-            pointTo = cloudIn->points[i];
-            Eigen::Vector3f point(cloudIn->points[i].x,
-                                    cloudIn->points[i].y,
-                                    cloudIn->points[i].z);
-            point = q_tIn * point + v_tIn;
-
-            pointTo.x = point.x();
-            pointTo.y = point.y();
-            pointTo.z = point.z();
-
-            cloudOut->push_back(pointTo);
-        }
-        return cloudOut;
-    }
-
     pcl::PointCloud<PointType>::Ptr transformPointCloud(pcl::PointCloud<PointType>::Ptr cloudIn,
                                                         const myPointTypePose* const tIn)
     {
@@ -910,8 +846,8 @@ mapOptimization():
                     // maxDis = std::max(maxDis, pd2);
                     float s;
                     // 加上影响因子
-                    s = 1 - 0.9 * fabs(pd2)/*/ sqrt(sqrt(pointSel.x * pointSel.x
-                            + pointSel.y * pointSel.y + pointSel.z * pointSel.z))*/;
+                    s = 1 - 0.9 * fabs(pd2)/ sqrt(sqrt(pointSel.x * pointSel.x
+                            + pointSel.y * pointSel.y + pointSel.z * pointSel.z));
 
                     if (s > 0.1) {
                         // [x,y,z]是整个平面的单位法量
@@ -949,6 +885,48 @@ mapOptimization():
         Eigen::Quaternionf q_Delta_x = Eigen::Quaternionf::Identity();
         Eigen::Vector3f v_Delta_x = Eigen::Vector3f::Zero();
 
+        #ifdef EULER_DERIVATION
+        Eigen::Vector3f e_transformTobeMapped = q_transformTobeMapped.toRotationMatrix().eulerAngles(0, 1, 2);
+        float s1 = sin(e_transformTobeMapped[0]);
+        float c1 = cos(e_transformTobeMapped[0]);
+        float s2 = sin(e_transformTobeMapped[1]);
+        float c2 = cos(e_transformTobeMapped[1]);
+        float s3 = sin(e_transformTobeMapped[2]);
+        float c3 = cos(e_transformTobeMapped[2]);
+        Eigen::Matrix<float, 3, 3> dRdrx;
+        Eigen::Matrix<float, 3, 3> dRdry;
+        Eigen::Matrix<float, 3, 3> dRdrz;
+        dRdrx(0, 0) = 0.0;
+        dRdrx(0, 1) = 0.0;
+        dRdrx(0, 2) = 0.0;
+        dRdrx(1, 0) = -s3*s1+s2*c3*c1;
+        dRdrx(1, 1) = -c3*s1-s2*s3*c1;
+        dRdrx(1, 2) = -c2*c1;
+        dRdrx(2, 0) = s3*c1+s2*c3*s1;
+        dRdrx(2, 1) = c3*c1-s2*s3*s1;
+        dRdrx(2, 2) = -c2*s1;
+
+        dRdry(0, 0) = -c3*s2;
+        dRdry(0, 1) = -s3*s2;
+        dRdry(0, 2) = c2;
+        dRdry(1, 0) = c3*s1*c2;
+        dRdry(1, 1) = -s1*s3*c2;
+        dRdry(1, 2) = s1*s2;
+        dRdry(2, 0) = -c1*c3*c2;
+        dRdry(2, 1) = c1*s3*c2;
+        dRdry(2, 2) = -c1*s2;
+
+        dRdrz(0, 0) = -c2*s3;
+        dRdrz(0, 1) = -c2*c3;
+        dRdrz(0, 2) = 0.0;
+        dRdrz(1, 0) = c1*c3-s1*s2*s3;
+        dRdrz(1, 1) = -c1*s3-s1*s2*c3;
+        dRdrz(1, 2) = 0.0;
+        dRdrz(2, 0) = s1*c3+c1*s2*s3;
+        dRdrz(2, 1) = -s1*s3+c1*s2*c3;
+        dRdrz(2, 2) = 0.0;
+        #endif
+
         for(int i=0; i<pointSelNum; i++)
         {
             // 当前点，在b_k+1坐标系
@@ -963,11 +941,19 @@ mapOptimization():
             // 2. dD/dG = (la, lb, lc)
             Eigen::Matrix<float, 1, 3> dDdG;
             dDdG << coeff.x, coeff.y, coeff.z;
+            #ifdef EULER_DERIVATION
+            dDdR(0, 0) = dDdG * dRdrx * v_pointOri_bk1;
+            dDdR(0, 1) = dDdG * dRdry * v_pointOri_bk1;
+            dDdR(0, 2) = dDdG * dRdrz * v_pointOri_bk1;
+            #else
             // 3. 将transformCur转成R，然后计算(-Rp)^
             Eigen::Matrix3f neg_Rp_sym;
-            anti_symmetric(-q_transformTobeMapped.toRotationMatrix()*v_pointOri_bk1, neg_Rp_sym);
+            // anti_symmetric(-q_transformTobeMapped.toRotationMatrix()*v_pointOri_bk1, neg_Rp_sym);
+            anti_symmetric(v_pointOri_bk1, neg_Rp_sym);
+            neg_Rp_sym = -q_transformTobeMapped.toRotationMatrix()*neg_Rp_sym;
             // 4. 计算(dD/dG)*(-Rp)^得到关于旋转的雅克比，取其中的yaw部分，记为j_yaw
             Eigen::Matrix<float, 1, 3> dDdR = dDdG * neg_Rp_sym;
+            #endif
             // 5. 计算关于平移的雅克比，即为(dD/dG)，取其中的x,y部分，记为j_x,j_y
             // 6. 组织该点的雅克比：[j_yaw,j_x,j_y]
             j_n(0, 0) = dDdR(0, 0);
@@ -1028,17 +1014,21 @@ mapOptimization():
         v_Delta_x[0] = Delta_x(3, 0);
         v_Delta_x[1] = Delta_x(4, 0);
         v_Delta_x[2] = Delta_x(5, 0);
+        #ifdef EULER_DERIVATION
         Eigen::AngleAxisf rollAngle = Eigen::AngleAxisf(Delta_x(0, 0), 
                                                         Eigen::Vector3f::UnitX());
         Eigen::AngleAxisf pitchAngle = Eigen::AngleAxisf(Delta_x(1, 0), 
                                                         Eigen::Vector3f::UnitY());
         Eigen::AngleAxisf yawAngle = Eigen::AngleAxisf(Delta_x(2, 0), 
                                                         Eigen::Vector3f::UnitZ());
-        // Eigen::Vector3f axis = Delta_x.block<3, 1>(0, 0);
-        // axis.normalize();
-        // Eigen::AngleAxisf Angle = Eigen::AngleAxisf(Delta_x.block<3, 1>(0, 0).norm(), axis);
         q_Delta_x = rollAngle*pitchAngle*yawAngle;
-        // q_Delta_x = Angle;
+        #else
+        Eigen::Vector3f axis = Delta_x.block<3, 1>(0, 0);
+        axis.normalize();
+        Eigen::AngleAxisf Angle = Eigen::AngleAxisf(Delta_x.block<3, 1>(0, 0).norm(), axis);
+        q_Delta_x = Angle;
+        #endif
+
         v_transformTobeMapped = v_transformTobeMapped + v_Delta_x;
         q_transformTobeMapped = q_transformTobeMapped * q_Delta_x;
 
