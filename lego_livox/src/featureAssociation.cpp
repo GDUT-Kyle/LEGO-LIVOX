@@ -289,11 +289,11 @@ public:
         kdtreeCornerLast.reset(new pcl::KdTreeFLANN<PointType>());
         kdtreeSurfLast.reset(new pcl::KdTreeFLANN<PointType>());
 
-        laserOdometry.header.frame_id = "/livox_init";
-        laserOdometry.child_frame_id = "/livox_odom";
+        laserOdometry.header.frame_id = "/camera_init";
+        laserOdometry.child_frame_id = "/camera_odom";
 
-        laserOdometryTrans.frame_id_ = "/livox_init";
-        laserOdometryTrans.child_frame_id_ = "/livox_odom";
+        laserOdometryTrans.frame_id_ = "/camera_init";
+        laserOdometryTrans.child_frame_id_ = "/camera_odom";
         
         isDegenerate = false;
         matP = Eigen::Matrix<float, 3, 3>::Zero();
@@ -1031,7 +1031,8 @@ public:
             dDdG << coeff.x, coeff.y, coeff.z;
             // 3. 将transformCur转成R，然后计算(-Rp)^
             Eigen::Matrix3f neg_Rp_sym;
-            // anti_symmetric(-q_transformCur.toRotationMatrix()*v_pointOri_bk1, neg_Rp_sym);
+            // anti_symmetric(q_transformCur.toRotationMatrix()*v_pointOri_bk1, neg_Rp_sym);
+            // neg_Rp_sym = -neg_Rp_sym;
             anti_symmetric(v_pointOri_bk1, neg_Rp_sym);
             neg_Rp_sym = -q_transformCur.toRotationMatrix()*neg_Rp_sym;
             // 4. 计算(dD/dG)*(-Rp)^得到关于旋转的雅克比，取其中的yaw部分，记为j_yaw
@@ -1157,7 +1158,8 @@ public:
             dDdG << coeff.x, coeff.y, coeff.z;
             // 3. 将transformCur转成R，然后计算(-Rp)^
             Eigen::Matrix3f neg_Rp_sym;
-            // anti_symmetric(-q_transformCur.toRotationMatrix()*v_pointOri_bk1, neg_Rp_sym);
+            // anti_symmetric(q_transformCur.toRotationMatrix()*v_pointOri_bk1, neg_Rp_sym);
+            // neg_Rp_sym = -neg_Rp_sym;
             anti_symmetric(v_pointOri_bk1, neg_Rp_sym);
             neg_Rp_sym = -q_transformCur.toRotationMatrix()*neg_Rp_sym;
             // 4. 计算(dD/dG)*(-Rp)^得到关于旋转的雅克比，取其中的yaw部分，记为j_yaw

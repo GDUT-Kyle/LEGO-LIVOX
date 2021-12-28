@@ -250,15 +250,15 @@ mapOptimization():
         downSizeFilterGlobalMapKeyPoses.setLeafSize(1.0, 1.0, 1.0);
         downSizeFilterGlobalMapKeyFrames.setLeafSize(0.4, 0.4, 0.4);
 
-        odomAftMapped.header.frame_id = "/livox_init";
+        odomAftMapped.header.frame_id = "/camera_init";
         odomAftMapped.child_frame_id = "/aft_mapped";
         // odomAftMapped.child_frame_id = "/livox";
 
-        aftMappedTrans.frame_id_ = "/livox_init";
+        aftMappedTrans.frame_id_ = "/camera_init";
         aftMappedTrans.child_frame_id_ = "/aft_mapped";
         // aftMappedTrans.child_frame_id_ = "/livox";
 
-        aftMappedOdomTrans.frame_id_ = "/livox_init";
+        aftMappedOdomTrans.frame_id_ = "/camera_init";
         // aftMappedTrans.child_frame_id_ = "/aft_mapped";
         aftMappedOdomTrans.child_frame_id_ = "/livox";
 
@@ -455,6 +455,20 @@ mapOptimization():
         // transformTobeMapped[2] = rotation[2];
 
         // 后面记得更新transformBefMapped
+    }
+
+    void updateTransformTobeMapped()
+    {
+        geometry_msgs::Quaternion geoQuat = tf::createQuaternionMsgFromRollPitchYaw
+        (transformTobeMapped[0], transformTobeMapped[1], transformTobeMapped[2]);
+        q_transformTobeMapped.x() = geoQuat.x;
+        q_transformTobeMapped.y() = geoQuat.y;
+        q_transformTobeMapped.z() = geoQuat.z;
+        q_transformTobeMapped.w() = geoQuat.w;
+
+        v_transformTobeMapped.x() = transformTobeMapped[3];
+        v_transformTobeMapped.y() = transformTobeMapped[4];
+        v_transformTobeMapped.z() = transformTobeMapped[5];
     }
 
     pcl::PointCloud<PointType>::Ptr transformPointCloud(pcl::PointCloud<PointType>::Ptr cloudIn,
@@ -885,14 +899,28 @@ mapOptimization():
         Eigen::Quaternionf q_Delta_x = Eigen::Quaternionf::Identity();
         Eigen::Vector3f v_Delta_x = Eigen::Vector3f::Zero();
 
+        // #define EULER_DERIVATION
         #ifdef EULER_DERIVATION
-        Eigen::Vector3f e_transformTobeMapped = q_transformTobeMapped.toRotationMatrix().eulerAngles(0, 1, 2);
-        float s1 = sin(e_transformTobeMapped[0]);
-        float c1 = cos(e_transformTobeMapped[0]);
-        float s2 = sin(e_transformTobeMapped[1]);
-        float c2 = cos(e_transformTobeMapped[1]);
-        float s3 = sin(e_transformTobeMapped[2]);
-        float c3 = cos(e_transformTobeMapped[2]);
+        // Eigen::Vector3f e_transformTobeMapped = q_transformTobeMapped.toRotationMatrix().eulerAngles(0, 1, 2);
+        double roll, pitch, yaw;
+        tf::Matrix3x3(tf::Quaternion(q_transformTobeMapped.x(), 
+                                      q_transformTobeMapped.y(), 
+                                      q_transformTobeMapped.z(), 
+                                      q_transformTobeMapped.w())).getRPY(roll, pitch, yaw);
+        
+        transformTobeMapped[0] = roll;
+        transformTobeMapped[1] = pitch;
+        transformTobeMapped[2] = yaw;
+        transformTobeMapped[3] = v_transformTobeMapped.x();
+        transformTobeMapped[4] = v_transformTobeMapped.y();
+        transformTobeMapped[5] = v_transformTobeMapped.z();
+        
+        float s1 = sin(roll);
+        float c1 = cos(roll);
+        float s2 = sin(pitch);
+        float c2 = cos(pitch);
+        float s3 = sin(yaw);
+        float c3 = cos(yaw);
         Eigen::Matrix<float, 3, 3> dRdrx;
         Eigen::Matrix<float, 3, 3> dRdry;
         Eigen::Matrix<float, 3, 3> dRdrz;
@@ -941,6 +969,7 @@ mapOptimization():
             // 2. dD/dG = (la, lb, lc)
             Eigen::Matrix<float, 1, 3> dDdG;
             dDdG << coeff.x, coeff.y, coeff.z;
+            Eigen::Matrix<float, 1, 3> dDdR;
             #ifdef EULER_DERIVATION
             dDdR(0, 0) = dDdG * dRdrx * v_pointOri_bk1;
             dDdR(0, 1) = dDdG * dRdry * v_pointOri_bk1;
@@ -948,11 +977,19 @@ mapOptimization():
             #else
             // 3. 将transformCur转成R，然后计算(-Rp)^
             Eigen::Matrix3f neg_Rp_sym;
-            // anti_symmetric(-q_transformTobeMapped.toRotationMatrix()*v_pointOri_bk1, neg_Rp_sym);
+            // 左扰动
+            // anti_symmetric(q_transformTobeMapped.toRotationMatrix()*v_pointOri_bk1, neg_Rp_sym);
+            // neg_Rp_sym = -neg_Rp_sym;
+            // 右扰动
             anti_symmetric(v_pointOri_bk1, neg_Rp_sym);
             neg_Rp_sym = -q_transformTobeMapped.toRotationMatrix()*neg_Rp_sym;
+
+            // dDdG = dDdG * q_transformTobeMapped.toRotationMatrix();
+            // anti_symmetric(v_pointOri_bk1, neg_Rp_sym);
+            // neg_Rp_sym = -q_transformTobeMapped.toRotationMatrix()*neg_Rp_sym;
+
             // 4. 计算(dD/dG)*(-Rp)^得到关于旋转的雅克比，取其中的yaw部分，记为j_yaw
-            Eigen::Matrix<float, 1, 3> dDdR = dDdG * neg_Rp_sym;
+            dDdR = dDdG * neg_Rp_sym;
             #endif
             // 5. 计算关于平移的雅克比，即为(dD/dG)，取其中的x,y部分，记为j_x,j_y
             // 6. 组织该点的雅克比：[j_yaw,j_x,j_y]
@@ -981,8 +1018,8 @@ mapOptimization():
             // 计算At*A的特征值和特征向量
             // 特征值存放在matE，特征向量matV
             Eigen::SelfAdjointEigenSolver<Eigen::Matrix<float, 6, 6>> eigenSolver(H);
-            matE = eigenSolver.eigenvalues();
-            matV = eigenSolver.eigenvectors();
+            matE = eigenSolver.eigenvalues().real();
+            matV = eigenSolver.eigenvectors().real();
 
             matV2 = matV;
             // 退化的具体表现是指什么？
@@ -1027,26 +1064,29 @@ mapOptimization():
         axis.normalize();
         Eigen::AngleAxisf Angle = Eigen::AngleAxisf(Delta_x.block<3, 1>(0, 0).norm(), axis);
         q_Delta_x = Angle;
-        #endif
 
         v_transformTobeMapped = v_transformTobeMapped + v_Delta_x;
+        // 右扰动
         q_transformTobeMapped = q_transformTobeMapped * q_Delta_x;
+        // 左扰动
+        // q_transformTobeMapped = q_Delta_x * q_transformTobeMapped;
+        #endif
 
         // std::cout<<iterCount<<"] Delta_x = "<<Delta_x.head<3>().transpose()/PI*180<<std::endl;
 
-        // transformTobeMapped[0] += Delta_x(0, 0);
-        // transformTobeMapped[1] += Delta_x(1, 0);
-        // transformTobeMapped[2] += Delta_x(2, 0);
-        // transformTobeMapped[3] += Delta_x(3, 0);
-        // transformTobeMapped[4] += Delta_x(4, 0);
-        // transformTobeMapped[5] += Delta_x(5, 0);
+        #ifdef EULER_DERIVATION
+        transformTobeMapped[0] += Delta_x(0, 0);
+        transformTobeMapped[1] += Delta_x(1, 0);
+        transformTobeMapped[2] += Delta_x(2, 0);
+        transformTobeMapped[3] += Delta_x(3, 0);
+        transformTobeMapped[4] += Delta_x(4, 0);
+        transformTobeMapped[5] += Delta_x(5, 0);
+        updateTransformTobeMapped();
+        #endif
         
         // Eigen::Vector3f tmp = q_transformTobeMapped.toRotationMatrix().eulerAngles(2, 1, 0);
 
         // std::cout<<"transformTobeMapped[2] : "<<tmp[0]/PI*180<<std::endl;
-
-        // ！！！ 要及时更新transformTobeMapped
-        // updateTransformTobeMapped();
 
         float deltaR = sqrt(
                             pow(pcl::rad2deg(Delta_x(0, 0)), 2) +
@@ -1121,8 +1161,8 @@ mapOptimization():
             saveThisKeyFrame = false;
         }
 
-        if(e_transformAftMapped.sum() > 0.17)
-            saveThisKeyFrame = true;
+        // if(e_transformAftMapped.sum() > 0.17)
+        //     saveThisKeyFrame = true;
 
         // 非关键帧 并且 非空，直接返回
         if (saveThisKeyFrame == false && !cloudKeyPoses3D->points.empty())
@@ -1131,6 +1171,8 @@ mapOptimization():
         previousRobotPosPoint = currentRobotPosPoint;
         previousRobotAttPoint = q_transformAftMapped;
 
+        // #define USE_GTSAM
+        #ifdef USE_GTSAM
         // 如果还没有关键帧
         if (cloudKeyPoses3D->points.empty()){
             // static Rot3 	RzRyRx (double x, double y, double z),Rotations around Z, Y, then X axes
@@ -1212,10 +1254,6 @@ mapOptimization():
         thisPose6D.time = timeLaserOdometry;
         cloudKeyPoses6D->push_back(thisPose6D);
 
-        // std::cout<<"roll : "<<latestEstimate.rotation().roll()<<", ";
-        // std::cout<<"pitch : "<<latestEstimate.rotation().pitch()<<", ";
-        // std::cout<<"yaw : "<<latestEstimate.rotation().yaw()<<std::endl;
-
         // 更新transformAftMapped[]
         // 更新transformAftMapped[]
         if (cloudKeyPoses3D->points.size() > 1){
@@ -1228,6 +1266,49 @@ mapOptimization():
             q_transformTobeMapped = q_transformAftMapped;
             v_transformTobeMapped = v_transformAftMapped;
         }
+        #else
+        PointType thisPose3D;
+        myPointTypePose thisPose6D;
+
+        // 取优化结果
+        // 又回到相机坐标系c系以及导航坐标系n'
+        thisPose3D.x = v_transformAftMapped.x();
+        thisPose3D.y = v_transformAftMapped.y();
+        thisPose3D.z = v_transformAftMapped.z();
+        thisPose3D.intensity = cloudKeyPoses3D->points.size();
+        cloudKeyPoses3D->push_back(thisPose3D);
+
+        thisPose6D.x = thisPose3D.x;
+        thisPose6D.y = thisPose3D.y;
+        thisPose6D.z = thisPose3D.z;
+        thisPose6D.intensity = thisPose3D.intensity;
+        // thisPose6D.roll  = latestEstimate.rotation().roll();
+        // thisPose6D.pitch = latestEstimate.rotation().pitch();
+        // thisPose6D.yaw   = latestEstimate.rotation().yaw();
+        thisPose6D.qx = q_transformAftMapped.x();
+        thisPose6D.qy = q_transformAftMapped.y();
+        thisPose6D.qz = q_transformAftMapped.z();
+        thisPose6D.qw = q_transformAftMapped.w();
+        thisPose6D.time = timeLaserOdometry;
+        cloudKeyPoses6D->push_back(thisPose6D);
+
+        // 更新transformAftMapped[]
+        // 更新transformAftMapped[]
+        if (cloudKeyPoses3D->points.size() > 1){
+            // q_transformAftMapped = latestEstimate.rotation().toQuaternion().cast<float>();
+            // v_transformAftMapped = latestEstimate.translation().cast<float>();
+
+            q_transformLast = q_transformAftMapped;
+            v_transformLast = v_transformAftMapped;
+
+            q_transformTobeMapped = q_transformAftMapped;
+            v_transformTobeMapped = v_transformAftMapped;
+        }
+        #endif
+
+        // std::cout<<"roll : "<<latestEstimate.rotation().roll()<<", ";
+        // std::cout<<"pitch : "<<latestEstimate.rotation().pitch()<<", ";
+        // std::cout<<"yaw : "<<latestEstimate.rotation().yaw()<<std::endl;
 
         // 把新帧作为keypose，保存对应的边缘点、平面点
         pcl::PointCloud<PointType>::Ptr thisCornerKeyFrame(new pcl::PointCloud<PointType>());
@@ -1275,7 +1356,7 @@ mapOptimization():
             sensor_msgs::PointCloud2 cloudMsgTemp;
             pcl::toROSMsg(*cloudKeyPoses3D, cloudMsgTemp);
             cloudMsgTemp.header.stamp = ros::Time().fromSec(timeLaserOdometry);
-            cloudMsgTemp.header.frame_id = "/livox_init";
+            cloudMsgTemp.header.frame_id = "/camera_init";
             pubKeyPoses.publish(cloudMsgTemp);
         }
         // 发布局部地图
@@ -1283,7 +1364,7 @@ mapOptimization():
             sensor_msgs::PointCloud2 cloudMsgTemp;
             pcl::toROSMsg(*laserCloudSurfFromMapDS, cloudMsgTemp);
             cloudMsgTemp.header.stamp = ros::Time().fromSec(timeLaserOdometry);
-            cloudMsgTemp.header.frame_id = "/livox_init";
+            cloudMsgTemp.header.frame_id = "/camera_init";
             pubRecentKeyFrames.publish(cloudMsgTemp);
         }
     }
