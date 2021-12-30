@@ -799,7 +799,9 @@ public:
                 float s = 1;
                 if (iterCount >= 0) {
                     // 加上影响因子
-                    s = 1 - 10 * fabs(pd2);
+                    s = 1 - 10.0 * fabs(pd2)/ sqrt(sqrt(pointSel.x * pointSel.x+
+                                                        pointSel.y * pointSel.y+
+                                                        pointSel.z * pointSel.z));
                 }
 
                 if (s > 0.1 && pd2 != 0) {

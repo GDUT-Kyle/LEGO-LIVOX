@@ -1069,6 +1069,7 @@ mapOptimization():
         v_transformTobeMapped = v_transformTobeMapped + v_Delta_x;
         // 右扰动
         q_transformTobeMapped = q_transformTobeMapped * q_Delta_x;
+        q_transformTobeMapped.normalize();
         // 左扰动
         // q_transformTobeMapped = q_Delta_x * q_transformTobeMapped;
         #endif
