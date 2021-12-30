@@ -26,7 +26,7 @@ Panels:
     Experimental: false
     Name: Time
     SyncMode: 0
-    SyncSource: laser_cloud_corner_last
+    SyncSource: /livox_pcl0
 Preferences:
   PromptSaveOnExit: true
 Toolbars:
@@ -483,7 +483,7 @@ Visualization Manager:
       Position Transformer: XYZ
       Queue Size: 10
       Selectable: true
-      Size (Pixels): 1
+      Size (Pixels): 2
       Size (m): 0.009999999776482582
       Style: Points
       Topic: /livox_pcl0
@@ -547,7 +547,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 57.79911804199219
+      Distance: 75.23907470703125
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -562,10 +562,10 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.2647963762283325
+      Pitch: 1.5697963237762451
       Target Frame: livox
       Value: Orbit (rviz)
-      Yaw: 2.495375156402588
+      Yaw: 3.0753655433654785
     Saved: ~
 Window Geometry:
   Displays:
