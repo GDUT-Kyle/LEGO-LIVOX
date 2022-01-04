@@ -6,6 +6,7 @@
 #include <visualization_msgs/MarkerArray.h>
 #include "livox_ros_driver/CustomMsg.h"
 #include "lego_livox/common.h"
+#include "lego_livox/cluster.h"
 
 class ImageProjection{
 private:
@@ -21,6 +22,7 @@ private:
     ros::Publisher pubSegmentedCloudPure;
     ros::Publisher pubSegmentedCloudInfo;
     // ros::Publisher pubOutlierCloud;
+    ros::Publisher pubClusterCloud;
 
     ros::Publisher pubMarkerArray;
 
@@ -34,6 +36,8 @@ private:
     pcl::PointCloud<PointType>::Ptr segmentedCloudPure; //分割后的部分的几何信息
     // pcl::PointCloud<PointType>::Ptr outlierCloud; //在分割时出现的异常
     pcl::PointCloud<PointType>::Ptr groundCloudSeeds; //地面点云
+
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr colored_clustered_cloud_ptr;
 
     #ifdef IS_CLUSTERS
     pcl::search::KdTree<PointType>::Ptr tree;
@@ -81,6 +85,11 @@ private:
     Eigen::MatrixXf normal_;
     float th_dist_d_;
 
+    std::vector<cv::Scalar> _colors;
+    pcl::VoxelGrid<PointType> downSizeFilter;
+    float _clustering_ranges[4] = {15.0, 30.0, 45.0, 60.0};
+    float _clustering_distances[5] = {0.5, 1.1, 1.6, 2.1, 2.6};
+
     // Eigen::Affine3f Ext_Livox = Eigen::Affine3f::Identity();
 public:
     ImageProjection():
@@ -96,6 +105,7 @@ public:
         pubSegmentedCloudPure = nh.advertise<sensor_msgs::PointCloud2> ("/segmented_cloud_pure", 1);
         pubSegmentedCloudInfo = nh.advertise<cloud_msgs::cloud_info> ("/segmented_cloud_info", 1);
         // pubOutlierCloud = nh.advertise<sensor_msgs::PointCloud2> ("/outlier_cloud", 1);
+        pubClusterCloud = nh.advertise<sensor_msgs::PointCloud2> ("/cluster_cloud", 1);
 
         pubMarkerArray = nh.advertise<visualization_msgs::MarkerArray>("/TEXT_VIEW_ARRAY", 10);
 
@@ -125,6 +135,8 @@ public:
         segmentedCloudPure.reset(new pcl::PointCloud<PointType>());
         // outlierCloud.reset(new pcl::PointCloud<PointType>());
         groundCloudSeeds.reset(new pcl::PointCloud<PointType>());
+
+        colored_clustered_cloud_ptr.reset(new pcl::PointCloud<pcl::PointXYZRGB>());
 
         fullCloud->points.resize(N_SCAN*Horizon_SCAN);
         fullInfoCloud->points.resize(N_SCAN*Horizon_SCAN);
@@ -168,6 +180,10 @@ public:
         // quaternion=yawAngle*pitchAngle*rollAngle;
         // Ext_Livox.pretranslate(Ext_trans);
         // Ext_Livox.rotate(quaternion);
+
+        // generateColors(_colors, 255);
+        // 下采样滤波器设置叶子间距，就是格子之间的最小距离
+        downSizeFilter.setLeafSize(0.4, 0.4, 0.4);
     }
 
 	// 初始化/重置各类参数内容
@@ -178,6 +194,7 @@ public:
         segmentedCloudPure->clear();
         // outlierCloud->clear();
         groundCloudSeeds->clear();
+        colored_clustered_cloud_ptr->clear();
 
         rangeMat = cv::Mat(N_SCAN, Horizon_SCAN, CV_32F, cv::Scalar::all(0));
         groundMat = cv::Mat(N_SCAN, Horizon_SCAN, CV_8S, cv::Scalar::all(0));
@@ -203,6 +220,99 @@ public:
         std::chrono::duration<double> time_used = std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1);
         // std::cout << "solve time cost = " << time_used.count() << " seconds. " << std::endl;
         ROS_DEBUG("solve time cost = %f seconds.", time_used.count());
+    }
+
+    static void downsamplePoints(const cv::Mat& src, cv::Mat& dst, size_t count)
+    {
+        CV_Assert(count >= 2);
+        CV_Assert(src.cols == 1 || src.rows == 1);
+        CV_Assert(src.total() >= count);
+        CV_Assert(src.type() == CV_8UC3);
+
+        dst.create(1, (int)count, CV_8UC3);
+        // TODO: optimize by exploiting symmetry in the distance matrix
+        cv::Mat dists((int)src.total(), (int)src.total(), CV_32FC1, cv::Scalar(0));
+        if (dists.empty())
+            std::cerr << "Such big matrix cann't be created." << std::endl;
+
+        for (int i = 0; i < dists.rows; i++)
+        {
+            for (int j = i; j < dists.cols; j++)
+            {
+            float dist = (float)cv::norm(src.at<cv::Point3_<uchar> >(i) - src.at<cv::Point3_<uchar> >(j));
+            dists.at<float>(j, i) = dists.at<float>(i, j) = dist;
+            }
+        }
+
+        double maxVal;
+        cv::Point maxLoc;
+        minMaxLoc(dists, 0, &maxVal, 0, &maxLoc);
+
+        dst.at<cv::Point3_<uchar> >(0) = src.at<cv::Point3_<uchar> >(maxLoc.x);
+        dst.at<cv::Point3_<uchar> >(1) = src.at<cv::Point3_<uchar> >(maxLoc.y);
+
+        cv::Mat activedDists(0, dists.cols, dists.type());
+        cv::Mat candidatePointsMask(1, dists.cols, CV_8UC1, cv::Scalar(255));
+        activedDists.push_back(dists.row(maxLoc.y));
+        candidatePointsMask.at<uchar>(0, maxLoc.y) = 0;
+
+        for (size_t i = 2; i < count; i++)
+        {
+            activedDists.push_back(dists.row(maxLoc.x));
+            candidatePointsMask.at<uchar>(0, maxLoc.x) = 0;
+
+            cv::Mat minDists;
+            reduce(activedDists, minDists, 0, CV_REDUCE_MIN);
+            minMaxLoc(minDists, 0, &maxVal, 0, &maxLoc, candidatePointsMask);
+            dst.at<cv::Point3_<uchar> >((int)i) = src.at<cv::Point3_<uchar> >(maxLoc.x);
+        }
+    }
+
+    void generateColors(std::vector<cv::Scalar>& colors, size_t count, size_t factor = 100)
+    {
+        if (count < 1)
+            return;
+
+        colors.resize(count);
+
+        if (count == 1)
+        {
+            colors[0] = cv::Scalar(0, 0, 255);  // red
+            return;
+        }
+        if (count == 2)
+        {
+            colors[0] = cv::Scalar(0, 0, 255);  // red
+            colors[1] = cv::Scalar(0, 255, 0);  // green
+            return;
+        }
+
+        // Generate a set of colors in RGB space. A size of the set is severel times (=factor) larger then
+        // the needed count of colors.
+        cv::Mat bgr(1, (int)(count * factor), CV_8UC3);
+        cv::randu(bgr, 0, 256);
+
+        // Convert the colors set to Lab space.
+        // Distances between colors in this space correspond a human perception.
+        cv::Mat lab;
+        cvtColor(bgr, lab, cv::COLOR_BGR2Lab);
+
+        // Subsample colors from the generated set so that
+        // to maximize the minimum distances between each other.
+        // Douglas-Peucker algorithm is used for this.
+        cv::Mat lab_subset;
+        downsamplePoints(lab, lab_subset, count);
+
+        // Convert subsampled colors back to RGB
+        cv::Mat bgr_subset;
+        cvtColor(lab_subset, bgr_subset, cv::COLOR_BGR2Lab);
+
+        CV_Assert(bgr_subset.total() == count);
+        for (size_t i = 0; i < count; i++)
+        {
+            cv::Point3_<uchar> c = bgr_subset.at<cv::Point3_<uchar> >((int)i);
+            colors[i] = cv::Scalar(c.x, c.y, c.z);
+        }
     }
 
     void copyPointCloud(const sensor_msgs::PointCloud2ConstPtr& laserCloudMsg){
@@ -457,7 +567,8 @@ void estimate_plane_(void){
         //         }
         //     }
         // }
-        // labelComponents();
+        // // // labelComponents();
+        // segmentByDistance(segmentedCloudPure, colored_clustered_cloud_ptr);
 
         int sizeOfSegCloud = 0;
         for (size_t i = 0; i < N_SCAN; ++i) {
@@ -595,6 +706,219 @@ void estimate_plane_(void){
         #endif
     }
 
+    void checkClusterMerge(size_t in_cluster_id, std::vector<ClusterPtr> &in_clusters,
+                        std::vector<bool> &in_out_visited_clusters, std::vector<size_t> &out_merge_indices,
+                        double in_merge_threshold)
+    {
+    // std::cout << "checkClusterMerge" << std::endl;
+    PointType point_a = in_clusters[in_cluster_id]->GetCentroid();
+    for (size_t i = 0; i < in_clusters.size(); i++)
+    {
+        if (i != in_cluster_id && !in_out_visited_clusters[i])
+        {
+        PointType point_b = in_clusters[i]->GetCentroid();
+        double distance = sqrt(pow(point_b.x - point_a.x, 2) + pow(point_b.y - point_a.y, 2));
+        if (distance <= in_merge_threshold)
+        {
+            in_out_visited_clusters[i] = true;
+            out_merge_indices.push_back(i);
+            // std::cout << "Merging " << in_cluster_id << " with " << i << " dist:" << distance << std::endl;
+            checkClusterMerge(i, in_clusters, in_out_visited_clusters, out_merge_indices, in_merge_threshold);
+        }
+        }
+    }
+    }
+
+    void mergeClusters(const std::vector<ClusterPtr> &in_clusters, std::vector<ClusterPtr> &out_clusters,
+                    std::vector<size_t> in_merge_indices, const size_t &current_index,
+                    std::vector<bool> &in_out_merged_clusters)
+    {
+    // std::cout << "mergeClusters:" << in_merge_indices.size() << std::endl;
+    pcl::PointCloud<pcl::PointXYZRGB> sum_cloud;
+    pcl::PointCloud<PointType> mono_cloud;
+    ClusterPtr merged_cluster(new Cluster());
+    for (size_t i = 0; i < in_merge_indices.size(); i++)
+    {
+        sum_cloud += *(in_clusters[in_merge_indices[i]]->GetCloud());
+        in_out_merged_clusters[in_merge_indices[i]] = true;
+    }
+    std::vector<int> indices(sum_cloud.points.size(), 0);
+    for (size_t i = 0; i < sum_cloud.points.size(); i++)
+    {
+        indices[i] = i;
+    }
+
+    if (sum_cloud.points.size() > 0)
+    {
+        pcl::copyPointCloud(sum_cloud, mono_cloud);
+        merged_cluster->SetCloud(mono_cloud.makeShared(), indices, cloudHeader, current_index,
+                                (int) _colors[current_index].val[0], (int) _colors[current_index].val[1],
+                                (int) _colors[current_index].val[2], "", false);
+        out_clusters.push_back(merged_cluster);
+    }
+    }
+
+    void checkAllForMerge(std::vector<ClusterPtr> &in_clusters, std::vector<ClusterPtr> &out_clusters,
+                        float in_merge_threshold)
+    {
+    // std::cout << "checkAllForMerge" << std::endl;
+    std::vector<bool> visited_clusters(in_clusters.size(), false);
+    std::vector<bool> merged_clusters(in_clusters.size(), false);
+    size_t current_index = 0;
+    for (size_t i = 0; i < in_clusters.size(); i++)
+    {
+        if (!visited_clusters[i])
+        {
+        visited_clusters[i] = true;
+        std::vector<size_t> merge_indices;
+        checkClusterMerge(i, in_clusters, visited_clusters, merge_indices, in_merge_threshold);
+        mergeClusters(in_clusters, out_clusters, merge_indices, current_index++, merged_clusters);
+        }
+    }
+    for (size_t i = 0; i < in_clusters.size(); i++)
+    {
+        // check for clusters not merged, add them to the output
+        if (!merged_clusters[i])
+        {
+        out_clusters.push_back(in_clusters[i]);
+        }
+    }
+
+    // ClusterPtr cluster(new Cluster());
+    }
+
+    std::vector<ClusterPtr> clusterAndColor(const pcl::PointCloud<PointType>::Ptr in_cloud_ptr,
+                                        std::vector<ClusterPtr> &clusters,
+                                        double in_max_cluster_distance = 0.5)
+    {
+        pcl::search::KdTree<PointType>::Ptr tree(new pcl::search::KdTree<PointType>);
+        // std::vector<pcl::PointCloud<PointType>> clusters;//保存分割后的所有类 每一类为一个点云
+        clusters.clear();
+        // // 欧式聚类对检测到的障碍物进行分组
+        int minsize = 50;
+        int maxsize = 6000;
+        std::vector<pcl::PointIndices> clusterIndices;// 创建索引类型对象
+        pcl::EuclideanClusterExtraction<PointType> ec; // 欧式聚类对象
+
+        // create 2d pc
+        pcl::PointCloud<PointType>::Ptr cloud_2d(new pcl::PointCloud<PointType>);
+        pcl::copyPointCloud(*in_cloud_ptr, *cloud_2d);
+        // make it flat
+        for (size_t i = 0; i < cloud_2d->points.size(); i++)
+        {
+            cloud_2d->points[i].z = 0;
+        }
+
+        if (cloud_2d->points.size() > 0)
+            tree->setInputCloud(cloud_2d);
+
+        ec.setClusterTolerance(in_max_cluster_distance);  //
+        ec.setMinClusterSize(minsize);
+        ec.setMaxClusterSize(maxsize);
+        ec.setSearchMethod(tree);
+        ec.setInputCloud(cloud_2d);
+        ec.extract(clusterIndices);
+        // use indices on 3d cloud
+
+        /////////////////////////////////
+        //---	3. Color clustered points
+        /////////////////////////////////
+        unsigned int k = 0;
+        for (pcl::PointIndices getIndices : clusterIndices)
+        {
+            ClusterPtr cluster(new Cluster());
+            cluster->SetCloud(in_cloud_ptr, getIndices.indices, cloudHeader, k, (int) _colors[k].val[0],
+                            (int) _colors[k].val[1],
+                            (int) _colors[k].val[2], "", false);
+            clusters.push_back(cluster);
+            k++;
+        }
+        return clusters;
+    }
+
+    void segmentByDistance(const pcl::PointCloud<PointType>::Ptr in_cloud, 
+                            pcl::PointCloud<pcl::PointXYZRGB>::Ptr out_cloud,
+                            double in_max_cluster_distance = 0.75)
+    {
+        pcl::PointCloud<PointType>::Ptr in_cloudDS(new pcl::PointCloud<PointType>());
+        downSizeFilter.setInputCloud(in_cloud);
+        downSizeFilter.filter(*in_cloudDS);
+        std::vector<ClusterPtr> clusters;
+
+        bool _use_multiple_thres = false;
+        if(!_use_multiple_thres)
+        {
+            clusterAndColor(in_cloudDS, clusters, in_max_cluster_distance);
+        }
+        else
+        {
+            std::vector<pcl::PointCloud<PointType>::Ptr> cloud_segments_array(5);
+            for (unsigned int i = 0; i < cloud_segments_array.size(); i++)
+            {
+                pcl::PointCloud<PointType>::Ptr tmp_cloud(new pcl::PointCloud<PointType>);
+                cloud_segments_array[i] = tmp_cloud;
+            }
+
+            for (unsigned int i = 0; i < in_cloudDS->points.size(); i++)
+            {
+                PointType current_point;
+                current_point.x = in_cloudDS->points[i].x;
+                current_point.y = in_cloudDS->points[i].y;
+                current_point.z = in_cloudDS->points[i].z;
+
+                float origin_distance = sqrt(pow(current_point.x, 2) + pow(current_point.y, 2));
+
+                if (origin_distance < _clustering_ranges[0])
+                {
+                    cloud_segments_array[0]->points.push_back(current_point);
+                }
+                else if (origin_distance < _clustering_ranges[1])
+                {
+                    cloud_segments_array[1]->points.push_back(current_point);
+
+                }else if (origin_distance < _clustering_ranges[2])
+                {
+                    cloud_segments_array[2]->points.push_back(current_point);
+
+                }else if (origin_distance < _clustering_ranges[3])
+                {
+                    cloud_segments_array[3]->points.push_back(current_point);
+
+                }else
+                {
+                    cloud_segments_array[4]->points.push_back(current_point);
+                }
+            }
+            std::vector<ClusterPtr> local_clusters;
+            for (unsigned int i = 0; i < cloud_segments_array.size(); i++)
+            {
+                clusterAndColor(cloud_segments_array[i], local_clusters, _clustering_distances[i]);
+                clusters.insert(clusters.end(), local_clusters.begin(), local_clusters.end());
+            }
+        }
+
+        // Clusters can be merged or checked in here
+        //....
+        // check for mergable clusters
+        // std::vector<ClusterPtr> mid_clusters;
+        // std::vector<ClusterPtr> final_clusters;
+
+        // if (clusters.size() > 0)
+        //     checkAllForMerge(clusters, mid_clusters, 1.5);
+        // else
+        //     mid_clusters = clusters;
+
+        // if (mid_clusters.size() > 0)
+        //     checkAllForMerge(mid_clusters, final_clusters, 1.5);
+        // else
+        //     final_clusters = mid_clusters;
+
+        for(int i=0; i<clusters.size(); i++)
+        {
+            *colored_clustered_cloud_ptr += *(clusters[i]->GetCloud());
+        }
+    }
+
     // 发布各类点云内容
     void publishCloud(){
         // 发布cloud_msgs::cloud_info消息
@@ -641,6 +965,14 @@ void estimate_plane_(void){
             laserCloudTemp.header.stamp = cloudHeader.stamp;
             laserCloudTemp.header.frame_id = "/livox";
             pubFullInfoCloud.publish(laserCloudTemp);
+        }
+
+        if(pubClusterCloud.getNumSubscribers() != 0)
+        {
+            pcl::toROSMsg(*colored_clustered_cloud_ptr, laserCloudTemp);
+            laserCloudTemp.header.stamp = cloudHeader.stamp;
+            laserCloudTemp.header.frame_id = "/livox";
+            pubClusterCloud.publish(laserCloudTemp);
         }
     }
 };

@@ -47,6 +47,10 @@
 #include "cloud_msgs/cloud_info.h"
 
 #include <opencv/cv.h>
+#include <opencv2/core/core.hpp>
+#include <opencv2/opencv.hpp>
+
+#include <iostream>
 
 #include <eigen3/Eigen/Dense>
 
@@ -114,7 +118,7 @@ extern const float th_dist = 0.2;
 
 extern const float DISTANCE_SQ_THRESHOLD = 3.0;
 
-extern const float ext_livox[] = {0.0, 0.0, 0.0, 0.0, 0.00, 0.0};
+extern const float ext_livox[] = {0.0, 0.0, 0.0, 0.0, 0.07, 0.0};
 
 extern const float scanPeriod = 0.1;
 extern const int systemDelay = 0;

@@ -54,7 +54,7 @@ link_directories(
 add_executable(livox_repub src/livox_repub.cpp)
 target_link_libraries(livox_repub ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBS})
 
-add_executable(imageProjection src/imageProjection.cpp)
+add_executable(imageProjection src/imageProjection.cpp src/cluster.cpp)
 add_dependencies(imageProjection ${catkin_EXPORTED_TARGETS} cloud_msgs_gencpp)
 target_link_libraries(imageProjection ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES})
 

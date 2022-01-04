@@ -1259,7 +1259,7 @@ public:
         if (laserCloudCornerLastNum < 10 || laserCloudSurfLastNum < 100)
             return;
 
-        for (int iterCount1 = 0; iterCount1 < 1; iterCount1++) {
+        for (int iterCount1 = 0; iterCount1 < 25; iterCount1++) {
             laserCloudOri->clear();
             coeffSel->clear();
 
