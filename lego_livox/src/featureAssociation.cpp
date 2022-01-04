@@ -6,6 +6,8 @@
 #include <pcl/segmentation/sac_segmentation.h>
 #include <pcl/segmentation/extract_clusters.h>
 
+#include <pcl/filters/radius_outlier_removal.h>   //半径滤波器头文件
+
 // #include <pcl/registration/icp.h>
 // #include <pcl/common/transforms.h>
 
@@ -17,12 +19,15 @@ private:
     ros::Subscriber subLaserCloud;
     ros::Subscriber subLaserCloudInfo;
     // ros::Subscriber subOutlierCloud;
+    ros::Subscriber subGroundCloud;
     ros::Subscriber subImu;
 
     // ros::Publisher pubLaserCloud_line;
     // ros::Publisher pubLaserCloud_line_point;
     // pcl::PointCloud<PointType>::Ptr line_Cloud;
     // pcl::PointCloud<PointType>::Ptr line_point_Cloud;
+
+    ros::Publisher pubGroundDS;
 
     ros::Publisher pubCornerPointsSharp;
     ros::Publisher pubCornerPointsLessSharp;
@@ -40,16 +45,20 @@ private:
     pcl::PointCloud<PointType>::Ptr surfPointsLessFlatScan;
     pcl::PointCloud<PointType>::Ptr surfPointsLessFlatScanDS;
 
+    pcl::PointCloud<PointType>::Ptr surfPointsGroundScan;
+    pcl::PointCloud<PointType>::Ptr surfPointsGroundScanDS;
+    pcl::VoxelGrid<PointType> GoundDownSizeFilter;
+
     pcl::VoxelGrid<PointType> downSizeFilter;
 
     double timeScanCur;
     double timeNewSegmentedCloud;
     double timeNewSegmentedCloudInfo;
-    double timeNewOutlierCloud;
+    double timeNewGroundCloud;
 
     bool newSegmentedCloud;
     bool newSegmentedCloudInfo;
-    bool newOutlierCloud;
+    bool newGroundCloud;
 
     cloud_msgs::cloud_info segInfo;
     std_msgs::Header cloudHeader;
@@ -177,6 +186,7 @@ public:
         subLaserCloud = nh.subscribe<sensor_msgs::PointCloud2>("/segmented_cloud", 1, &featureAssociation::laserCloudHandler, this);
         subLaserCloudInfo = nh.subscribe<cloud_msgs::cloud_info>("/segmented_cloud_info", 1, &featureAssociation::laserCloudInfoHandler, this);
         // subOutlierCloud = nh.subscribe<sensor_msgs::PointCloud2>("/outlier_cloud", 1, &featureAssociation::outlierCloudHandler, this);
+        subGroundCloud = nh.subscribe<sensor_msgs::PointCloud2>("/ground_cloud", 1, &featureAssociation::GroundCloudHandler, this);
         subImu = nh.subscribe<sensor_msgs::Imu>(imuTopic, 50, &featureAssociation::imuHandler, this);
 
         pubCornerPointsSharp = nh.advertise<sensor_msgs::PointCloud2>("/laser_cloud_sharp", 1);
@@ -191,6 +201,8 @@ public:
 
         // pubLaserCloud_line_point = nh.advertise<sensor_msgs::PointCloud2>("/line_point", 2);
         // pubLaserCloud_line = nh.advertise<sensor_msgs::PointCloud2>("/line", 2);
+
+        pubGroundDS = nh.advertise<sensor_msgs::PointCloud2>("/ground_downsize", 2);
         
         initializationValue();
     }
@@ -202,6 +214,8 @@ public:
 
         // 下采样滤波器设置叶子间距，就是格子之间的最小距离
         downSizeFilter.setLeafSize(0.2, 0.2, 0.2);
+
+        GoundDownSizeFilter.setLeafSize(1.0, 1.0, 1.0);
 
         segmentedCloud.reset(new pcl::PointCloud<PointType>());
         outlierCloud.reset(new pcl::PointCloud<PointType>());
@@ -217,14 +231,17 @@ public:
         surfPointsLessFlatScan.reset(new pcl::PointCloud<PointType>());
         surfPointsLessFlatScanDS.reset(new pcl::PointCloud<PointType>());
 
+        surfPointsGroundScan.reset(new pcl::PointCloud<PointType>());
+        surfPointsGroundScanDS.reset(new pcl::PointCloud<PointType>());
+
         timeScanCur = 0;
         timeNewSegmentedCloud = 0;
         timeNewSegmentedCloudInfo = 0;
-        timeNewOutlierCloud = 0;
+        timeNewGroundCloud = 0;
 
         newSegmentedCloud = false;
         newSegmentedCloudInfo = false;
-        newOutlierCloud = false;
+        newGroundCloud = false;
 
         systemInitCount = 0;
         systemInited = false;
@@ -316,14 +333,14 @@ public:
         newSegmentedCloud = true;
     }
 
-    void outlierCloudHandler(const sensor_msgs::PointCloud2ConstPtr& msgIn){
+    void GroundCloudHandler(const sensor_msgs::PointCloud2ConstPtr& msgIn){
 
-        // timeNewOutlierCloud = msgIn->header.stamp.toSec();
+        timeNewGroundCloud = msgIn->header.stamp.toSec();
 
-        // outlierCloud->clear();
-        // pcl::fromROSMsg(*msgIn, *outlierCloud);
+        surfPointsGroundScan->clear();
+        pcl::fromROSMsg(*msgIn, *surfPointsGroundScan);
 
-        // newOutlierCloud = true;
+        newGroundCloud = true;
     }
 
     void laserCloudInfoHandler(const cloud_msgs::cloud_infoConstPtr& msgIn)
@@ -343,6 +360,33 @@ public:
     //     for (int i = 0; i < cloudSize; i++) {
     //     }
     // }
+
+    void DownSizeGroudCloud()
+    {
+        GoundDownSizeFilter.setLeafSize(1.0, 1.0, 1.0);
+        GoundDownSizeFilter.setInputCloud(surfPointsGroundScan);
+        GoundDownSizeFilter.filter(*surfPointsGroundScanDS);
+ 
+        pcl::RadiusOutlierRemoval<PointType> radiusoutlier;  //创建滤波器
+        
+        radiusoutlier.setInputCloud(surfPointsGroundScanDS);    //设置输入点云
+        radiusoutlier.setRadiusSearch(10);     //设置半径为100的范围内找临近点
+        radiusoutlier.setMinNeighborsInRadius(30); //设置查询点的邻域点集数小于2的删除
+        radiusoutlier.filter(*surfPointsGroundScanDS);
+
+        GoundDownSizeFilter.setLeafSize(0.5, 0.5, 0.5);
+        GoundDownSizeFilter.setInputCloud(surfPointsGroundScan);
+        GoundDownSizeFilter.filter(*surfPointsGroundScan);
+
+        if(pubGroundDS.getNumSubscribers() != 0)
+        {
+            sensor_msgs::PointCloud2 msg_tmp;
+            pcl::toROSMsg(*surfPointsGroundScan, msg_tmp);
+            msg_tmp.header.stamp = cloudHeader.stamp;
+            msg_tmp.header.frame_id = "/livox";
+            pubGroundDS.publish(msg_tmp);
+        }
+    }
 
     void adjustDistortion()
     {
@@ -445,6 +489,10 @@ public:
         surfPointsFlat->clear();
         surfPointsLessFlat->clear();
 
+        // surfPointsGroundScan->clear();
+        // surfPointsGroundScanDS->clear();
+
+        // 按线遍历
         for(int i=0; i<N_SCAN; i++)
         {
             surfPointsLessFlatScan->clear();
@@ -523,6 +571,7 @@ public:
                     SumCurRegion -= cloudCurvature[ind];
                 }
 
+                // 从地面点中筛选surfPointsFlat
                 int smallestPickedNum = 0;
                 for(int k=sp; k<=ep; k++)
                 {
@@ -544,21 +593,21 @@ public:
                         }
 
                         cloudNeighborPicked[ind] = 1;
-                        for(int l=1; l<=3; l++)
+                        for(int l=1; l<=5; l++)
                         {
                             // 从前面往后判断是否是需要的邻接点，是的话就进行标记
                             int columnDiff = std::abs(int(segInfo.segmentedCloudColInd[ind+l]-segInfo.segmentedCloudColInd[ind+l-1]));
-                            if(columnDiff > 6)
+                            if(columnDiff > 10)
                             {
                                 break;
                             }
                             cloudNeighborPicked[ind+l] = 1;
                         }
-                        for(int l=-1; l>=-3; l--)
+                        for(int l=-1; l>=-5; l--)
                         {
                             // 从后往前开始标记 
                             int columnDiff = std::abs(int(segInfo.segmentedCloudColInd[ind + l] - segInfo.segmentedCloudColInd[ind + l + 1]));
-                            if (columnDiff > 6)
+                            if (columnDiff > 10)
                                 break;
 
                             cloudNeighborPicked[ind + l] = 1;
@@ -1330,11 +1379,11 @@ public:
         laserCloudCornerLastNum = laserCloudCornerLast->points.size();
         laserCloudSurfLastNum = laserCloudSurfLast->points.size();
 
-        // if(laserCloudCornerLastNum>10 && laserCloudSurfLastNum>100)
-        // {
+        if(laserCloudCornerLastNum>10 && laserCloudSurfLastNum>100)
+        {
             kdtreeCornerLast->setInputCloud(laserCloudCornerLast);
             kdtreeSurfLast->setInputCloud(laserCloudSurfLast);
-        // }
+        }
 
         frameCount++;
 
@@ -1441,17 +1490,20 @@ public:
     {
         std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
         // 如果有新数据进来则执行，否则不执行任何操作
-        if (newSegmentedCloud && newSegmentedCloudInfo &&
-            std::abs(timeNewSegmentedCloudInfo - timeNewSegmentedCloud) < 0.05){
+        if (newSegmentedCloud && newSegmentedCloudInfo && newGroundCloud &&
+            std::abs(timeNewSegmentedCloudInfo - timeNewSegmentedCloud) < 0.05 &&
+            std::abs(timeNewSegmentedCloudInfo - timeNewGroundCloud) < 0.05 ){
 
             newSegmentedCloud = false;
             newSegmentedCloudInfo = false;
+            newGroundCloud = false;
         }else{
             return;
         }
 
         // 主要进行的处理是将点云数据进行坐标变换，进行插补等工作
         // adjustDistortion();
+        DownSizeGroudCloud();
 
         // 不完全按照公式进行光滑性计算，并保存结果
         calculateSmoothness();
