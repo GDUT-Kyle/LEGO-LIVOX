@@ -43,6 +43,7 @@
 #include <sensor_msgs/Imu.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <nav_msgs/Odometry.h>
+#include <std_msgs/Float64MultiArray.h>
 
 #include "cloud_msgs/cloud_info.h"
 

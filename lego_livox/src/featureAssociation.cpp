@@ -22,10 +22,12 @@ private:
     ros::Subscriber subGroundCloud;
     ros::Subscriber subImu;
 
-    // ros::Publisher pubLaserCloud_line;
-    // ros::Publisher pubLaserCloud_line_point;
-    // pcl::PointCloud<PointType>::Ptr line_Cloud;
-    // pcl::PointCloud<PointType>::Ptr line_point_Cloud;
+    ros::Subscriber subPlaneEquation;
+
+    ros::Publisher pubLaserCloud_line;
+    ros::Publisher pubLaserCloud_line_point;
+    pcl::PointCloud<PointType>::Ptr line_Cloud;
+    pcl::PointCloud<PointType>::Ptr line_point_Cloud;
 
     ros::Publisher pubGroundDS;
 
@@ -47,6 +49,7 @@ private:
 
     pcl::PointCloud<PointType>::Ptr surfPointsGroundScan;
     pcl::PointCloud<PointType>::Ptr surfPointsGroundScanDS;
+    pcl::PointCloud<PointType>::Ptr surfPointsGroundScanLast;
     pcl::VoxelGrid<PointType> GoundDownSizeFilter;
 
     pcl::VoxelGrid<PointType> downSizeFilter;
@@ -55,10 +58,12 @@ private:
     double timeNewSegmentedCloud;
     double timeNewSegmentedCloudInfo;
     double timeNewGroundCloud;
+    double timePlaneEqu;
 
     bool newSegmentedCloud;
     bool newSegmentedCloudInfo;
     bool newGroundCloud;
+    bool newPlaneEqu;
 
     cloud_msgs::cloud_info segInfo;
     std_msgs::Header cloudHeader;
@@ -178,6 +183,9 @@ private:
 
     float lastCost = 0.0;
 
+    Eigen::Matrix<float, 4, 1> PlaneEqu;
+    Eigen::Matrix<float, 4, 1> PlaneEquLast;
+
 public:
     featureAssociation():
         nh("~")
@@ -188,6 +196,7 @@ public:
         // subOutlierCloud = nh.subscribe<sensor_msgs::PointCloud2>("/outlier_cloud", 1, &featureAssociation::outlierCloudHandler, this);
         subGroundCloud = nh.subscribe<sensor_msgs::PointCloud2>("/ground_cloud", 1, &featureAssociation::GroundCloudHandler, this);
         subImu = nh.subscribe<sensor_msgs::Imu>(imuTopic, 50, &featureAssociation::imuHandler, this);
+        subPlaneEquation = nh.subscribe<std_msgs::Float64MultiArray>("/plane_equation", 1, &featureAssociation::PlaneEqHandler, this);
 
         pubCornerPointsSharp = nh.advertise<sensor_msgs::PointCloud2>("/laser_cloud_sharp", 1);
         pubCornerPointsLessSharp = nh.advertise<sensor_msgs::PointCloud2>("/laser_cloud_less_sharp", 1);
@@ -199,8 +208,8 @@ public:
         pubOutlierCloudLast = nh.advertise<sensor_msgs::PointCloud2>("/outlier_cloud_last", 2);
         pubLaserOdometry = nh.advertise<nav_msgs::Odometry> ("/laser_odom_to_init", 5);
 
-        // pubLaserCloud_line_point = nh.advertise<sensor_msgs::PointCloud2>("/line_point", 2);
-        // pubLaserCloud_line = nh.advertise<sensor_msgs::PointCloud2>("/line", 2);
+        pubLaserCloud_line_point = nh.advertise<sensor_msgs::PointCloud2>("/line_point", 2);
+        pubLaserCloud_line = nh.advertise<sensor_msgs::PointCloud2>("/line", 2);
 
         pubGroundDS = nh.advertise<sensor_msgs::PointCloud2>("/ground_downsize", 2);
         
@@ -220,8 +229,8 @@ public:
         segmentedCloud.reset(new pcl::PointCloud<PointType>());
         outlierCloud.reset(new pcl::PointCloud<PointType>());
 
-        // line_point_Cloud.reset(new pcl::PointCloud<PointType>());
-        // line_Cloud.reset(new pcl::PointCloud<PointType>());
+        line_point_Cloud.reset(new pcl::PointCloud<PointType>());
+        line_Cloud.reset(new pcl::PointCloud<PointType>());
 
         cornerPointsSharp.reset(new pcl::PointCloud<PointType>());
         cornerPointsLessSharp.reset(new pcl::PointCloud<PointType>());
@@ -233,15 +242,18 @@ public:
 
         surfPointsGroundScan.reset(new pcl::PointCloud<PointType>());
         surfPointsGroundScanDS.reset(new pcl::PointCloud<PointType>());
+        surfPointsGroundScanLast.reset(new pcl::PointCloud<PointType>());
 
         timeScanCur = 0;
         timeNewSegmentedCloud = 0;
         timeNewSegmentedCloudInfo = 0;
         timeNewGroundCloud = 0;
+        timePlaneEqu = 0;
 
         newSegmentedCloud = false;
         newSegmentedCloudInfo = false;
         newGroundCloud = false;
+        newPlaneEqu = false;
 
         systemInitCount = 0;
         systemInited = false;
@@ -316,6 +328,9 @@ public:
         matP = Eigen::Matrix<float, 3, 3>::Zero();
 
         frameCount = skipFrameNum;
+
+        PlaneEqu.setZero();
+        PlaneEquLast.setZero();
     }
 
     ~featureAssociation(){};
@@ -354,6 +369,18 @@ public:
     {
     }
 
+    void PlaneEqHandler(const std_msgs::Float64MultiArrayConstPtr& planeIn)
+    {
+        timePlaneEqu = planeIn->data[0];
+        // std::cout<<"planeIn : "<<planeIn->data[3]<<", "<<planeIn->data[4]<<std::endl;
+        PlaneEqu(0, 0) = planeIn->data[1];
+        PlaneEqu(1, 0) = planeIn->data[2];
+        PlaneEqu(2, 0) = planeIn->data[3];
+        PlaneEqu(3, 0) = planeIn->data[4];
+        // std::cout<<"PlaneEqu : "<<PlaneEqu.transpose()<<std::endl;
+        newPlaneEqu = true;
+    }
+
     // void adjustDistortion()
     // {
     //     // 遍历点云中每个点
@@ -363,18 +390,20 @@ public:
 
     void DownSizeGroudCloud()
     {
-        GoundDownSizeFilter.setLeafSize(1.0, 1.0, 1.0);
+        GoundDownSizeFilter.setLeafSize(0.5, 0.5, 0.5);
         GoundDownSizeFilter.setInputCloud(surfPointsGroundScan);
         GoundDownSizeFilter.filter(*surfPointsGroundScanDS);
  
         pcl::RadiusOutlierRemoval<PointType> radiusoutlier;  //创建滤波器
         
         radiusoutlier.setInputCloud(surfPointsGroundScanDS);    //设置输入点云
-        radiusoutlier.setRadiusSearch(10);     //设置半径为100的范围内找临近点
+        radiusoutlier.setRadiusSearch(5);     //设置半径为100的范围内找临近点
         radiusoutlier.setMinNeighborsInRadius(30); //设置查询点的邻域点集数小于2的删除
         radiusoutlier.filter(*surfPointsGroundScanDS);
 
-        GoundDownSizeFilter.setLeafSize(0.5, 0.5, 0.5);
+        // std::cout<<"surfPointsGroundScanDS : "<<surfPointsGroundScanDS->size()<<std::endl;
+
+        GoundDownSizeFilter.setLeafSize(0.3, 0.3, 0.3);
         GoundDownSizeFilter.setInputCloud(surfPointsGroundScan);
         GoundDownSizeFilter.filter(*surfPointsGroundScan);
 
@@ -632,6 +661,11 @@ public:
 
             *surfPointsLessFlat += *surfPointsLessFlatScanDS;
         }
+
+        #ifdef PLANE_EQU
+        surfPointsFlat->clear();
+        *surfPointsFlat = *surfPointsGroundScanDS;
+        #endif
     }
 
     void publishCloud()
@@ -710,11 +744,17 @@ public:
         surfPointsLessFlat = laserCloudSurfLast;
         laserCloudSurfLast = laserCloudTemp;
 
+        *surfPointsGroundScanLast = *surfPointsGroundScan;
+
         kdtreeCornerLast->setInputCloud(laserCloudCornerLast);
-        kdtreeSurfLast->setInputCloud(laserCloudSurfLast);
+        #ifdef PLANE_EQU
+        // kdtreeSurfLast->setInputCloud(laserCloudSurfLast);
+        kdtreeSurfLast->setInputCloud(surfPointsGroundScanLast);
+        #endif
 
         laserCloudCornerLastNum = laserCloudCornerLast->points.size();
-        laserCloudSurfLastNum = laserCloudSurfLast->points.size();
+        // laserCloudSurfLastNum = laserCloudSurfLast->points.size();
+        laserCloudSurfLastNum = surfPointsGroundScanLast->points.size();
 
         sensor_msgs::PointCloud2 laserCloudCornerLast2;
         pcl::toROSMsg(*laserCloudCornerLast, laserCloudCornerLast2);
@@ -731,20 +771,23 @@ public:
         // transformSum[0] += imuPitchStart;
         // transformSum[2] += imuRollStart;
 
+        PlaneEquLast = PlaneEqu;
+
         systemInitedLM = true;
     }
 
     void updateInitialGuess(){
     }
 
+    #ifdef PLANE_EQU
     void findCorrespondingSurfFeatures(int iterCount){
         int surfPointsFlatNum = surfPointsFlat->points.size();
-        // if(iterCount % 5 == 0)
-        // {
-        //     line_Cloud->clear();
-        //     line_point_Cloud->clear();
-        // }
-        // std::cout<<v_transformCur.transpose()<<std::endl;
+        if(iterCount % 5 == 0)
+        {
+            line_Cloud->clear();
+            line_point_Cloud->clear();
+        }
+        // std::cout<<surfPointsFlatNum<<std::endl;
         float maxDis = 0.0;
         for (int i = 0; i < surfPointsFlatNum; i++) {
             // 坐标变换到开始时刻，参数0是输入，参数1是输出,校正运动畸变
@@ -770,9 +813,9 @@ public:
                     // 但是QR分解一般比SVD分解快，所以我们选择使用QR分解
                     for(int j=0; j<5; j++)
                     {
-                        matA0(j, 0) = laserCloudSurfLast->points[pointSearchInd[j]].x;
-                        matA0(j, 1) = laserCloudSurfLast->points[pointSearchInd[j]].y;
-                        matA0(j, 2) = laserCloudSurfLast->points[pointSearchInd[j]].z;
+                        matA0(j, 0) = surfPointsGroundScanLast->points[pointSearchInd[j]].x;
+                        matA0(j, 1) = surfPointsGroundScanLast->points[pointSearchInd[j]].y;
+                        matA0(j, 2) = surfPointsGroundScanLast->points[pointSearchInd[j]].z;
                     }
                     // 计算平面的法向量
                     Eigen::Vector3f norm = matA0.colPivHouseholderQr().solve(matB0);
@@ -784,9 +827,9 @@ public:
                     for(int j=0; j<5; j++)
                     {
                         // if OX * n > 0.2, then plane is not fit well
-                        float ox_n = fabs(norm(0)*laserCloudSurfLast->points[pointSearchInd[j]].x+
-                                            norm(1)*laserCloudSurfLast->points[pointSearchInd[j]].y+
-                                            norm(2)*laserCloudSurfLast->points[pointSearchInd[j]].z + 
+                        float ox_n = fabs(norm(0)*surfPointsGroundScanLast->points[pointSearchInd[j]].x+
+                                            norm(1)*surfPointsGroundScanLast->points[pointSearchInd[j]].y+
+                                            norm(2)*surfPointsGroundScanLast->points[pointSearchInd[j]].z + 
                                             negative_OA_dot_norm);
                         if(ox_n > 0.02)
                         {
@@ -800,13 +843,12 @@ public:
                         pointSearchSurfInd1[i] = pointSearchInd[0];
                         pointSearchSurfInd2[i] = pointSearchInd[2];
                         pointSearchSurfInd3[i] = pointSearchInd[4];
-
-                        // if(iterCount % 5 == 0)
-                        // {pointSel.intensity = i;
-                        // line_point_Cloud->push_back(surfPointsFlat->points[i]);
-                        // line_Cloud->push_back(laserCloudSurfLast->points[pointSearchSurfInd1[i]]);
-                        // line_Cloud->push_back(laserCloudSurfLast->points[pointSearchSurfInd2[i]]);
-                        // line_Cloud->push_back(laserCloudSurfLast->points[pointSearchSurfInd3[i]]);}
+                        if(iterCount % 5 == 0)
+                        {pointSel.intensity = i;
+                        line_point_Cloud->push_back(surfPointsFlat->points[i]);
+                        line_Cloud->push_back(surfPointsGroundScanLast->points[pointSearchSurfInd1[i]]);
+                        line_Cloud->push_back(surfPointsGroundScanLast->points[pointSearchSurfInd2[i]]);
+                        line_Cloud->push_back(surfPointsGroundScanLast->points[pointSearchSurfInd3[i]]);}
                     }
                 }
             }
@@ -815,9 +857,9 @@ public:
             // [pa,pb,pc]是tripod1，tripod2，tripod3这3个点构成的一个平面的方向量，
             // ps是模长，它是三角形面积的2倍
             if (pointSearchSurfInd2[i] >= 0 && pointSearchSurfInd3[i] >= 0) {
-                tripod1 = laserCloudSurfLast->points[pointSearchSurfInd1[i]];
-                tripod2 = laserCloudSurfLast->points[pointSearchSurfInd2[i]];
-                tripod3 = laserCloudSurfLast->points[pointSearchSurfInd3[i]];
+                tripod1 = surfPointsGroundScanLast->points[pointSearchSurfInd1[i]];
+                tripod2 = surfPointsGroundScanLast->points[pointSearchSurfInd2[i]];
+                tripod3 = surfPointsGroundScanLast->points[pointSearchSurfInd3[i]];
 
                 Eigen::Vector3f tmp_a(tripod1.x, tripod1.y, tripod1.z);
                 Eigen::Vector3f tmp_b(tripod2.x, tripod2.y, tripod2.z);
@@ -848,12 +890,10 @@ public:
                 float s = 1;
                 if (iterCount >= 0) {
                     // 加上影响因子
-                    s = 1 - 10.0 * fabs(pd2)/ sqrt(sqrt(pointSel.x * pointSel.x+
-                                                        pointSel.y * pointSel.y+
-                                                        pointSel.z * pointSel.z));
+                    s = 1 - 0.9 * fabs(pd2);
                 }
 
-                if (s > 0.1 && pd2 != 0) {
+                if (s > 0.4 && pd2 != 0) {
                     // [x,y,z]是整个平面的单位法量
                     // intensity是平面外一点到该平面的距离
                     coeff.x = s * pa;
@@ -869,6 +909,7 @@ public:
         }
         // std::cout<<"size : "<<laserCloudOri->size()<<std::endl;
     }
+    #endif
 
     void findCorrespondingCornerFeatures(int iterCount){
         int cornerPointsSharpNum = cornerPointsSharp->points.size();
@@ -1007,6 +1048,7 @@ public:
         // q_transformCur = Angle;
     }
 
+    #ifdef PLANE_EQU
     bool calculateTransformationSurf(int iterCount){
 
         {
@@ -1055,6 +1097,8 @@ public:
         }
 
         int pointSelNum = laserCloudOri->points.size();
+
+        // std::cout<<"pointSelNum : "<<pointSelNum<<std::endl;
 
         Eigen::Vector3f v_pointOri_bk1;
 
@@ -1178,6 +1222,7 @@ public:
 
         return true; 
     }
+    #endif
 
     bool calculateTransformationCorner(int iterCount){
         int pointSelNum = laserCloudOri->points.size();
@@ -1304,10 +1349,34 @@ public:
         return true; 
     }
 
+    void calculateTransformationGround()
+    {
+        Eigen::Vector3f NormalCurr = PlaneEqu.block<3, 1>(0, 0);
+        float dLast = PlaneEqu(3, 0);
+        float pitchCurr = atan2(NormalCurr.x(), NormalCurr.z());
+        float rollCurr = atan2(NormalCurr.y(), NormalCurr.z());
+
+        Eigen::Vector3f NormalLast = PlaneEquLast.block<3, 1>(0, 0);
+        float dCurr = PlaneEquLast(3, 0);
+        float pitchLast = atan2(NormalLast.x(), NormalLast.z());
+        float rollLast = atan2(NormalLast.y(), NormalLast.z());
+
+        // 更新
+        transformCur[0] = (rollCurr - rollLast);
+        transformCur[1] = (pitchCurr - pitchLast);
+        transformCur[5] = (dCurr-dLast);
+        updateTransformCur();
+        // std::cout<<"roll = "<<transformCur[0]/PI*180<<", "<<"pitch = "<<transformCur[1]/PI*180<<std::endl;
+
+        PlaneEquLast = PlaneEqu;
+    }
+    
     void updateTransformation(){
+        // std::cout<<laserCloudSurfLastNum<<std::endl;
         if (laserCloudCornerLastNum < 10 || laserCloudSurfLastNum < 100)
             return;
 
+        #ifdef PLANE_EQU
         for (int iterCount1 = 0; iterCount1 < 25; iterCount1++) {
             laserCloudOri->clear();
             coeffSel->clear();
@@ -1323,6 +1392,10 @@ public:
             if (calculateTransformationSurf(iterCount1) == false)
                 break;
         }
+        #else
+        // 既然我们在预处理那花了这么多心思提取地平面，那我们索性直接使用地平面的法向量变化计算roll, pitch, 和z
+        calculateTransformationGround();
+        #endif
 
         // std::cout<<"transform : "<< transformCur[0]<<", "<<transformCur[2]<<", "<<transformCur[4]<<std::endl;
         // std::cout<<"surf coeffSel : "<<coeffSel->size();
@@ -1377,13 +1450,20 @@ public:
         laserCloudSurfLast = laserCloudTemp;
 
         laserCloudCornerLastNum = laserCloudCornerLast->points.size();
-        laserCloudSurfLastNum = laserCloudSurfLast->points.size();
+        // laserCloudSurfLastNum = laserCloudSurfLast->points.size();
+        laserCloudSurfLastNum = surfPointsGroundScan->points.size();
 
         if(laserCloudCornerLastNum>10 && laserCloudSurfLastNum>100)
         {
             kdtreeCornerLast->setInputCloud(laserCloudCornerLast);
-            kdtreeSurfLast->setInputCloud(laserCloudSurfLast);
+            #ifdef PLANE_EQU
+            // kdtreeSurfLast->setInputCloud(laserCloudSurfLast);
+            kdtreeSurfLast->setInputCloud(surfPointsGroundScan);
+            #endif
         }
+
+        surfPointsGroundScanLast->clear();
+        *surfPointsGroundScanLast = *surfPointsGroundScan;
 
         frameCount++;
 
@@ -1403,16 +1483,16 @@ public:
             laserCloudSurfLast2.header.frame_id = "/livox";
             pubLaserCloudSurfLast.publish(laserCloudSurfLast2);
 
-            // sensor_msgs::PointCloud2 line_point_msg;
-            // pcl::toROSMsg(*line_point_Cloud, line_point_msg);
-            // line_point_msg.header.stamp = cloudHeader.stamp;
-            // line_point_msg.header.frame_id = "/livox";
-            // pubLaserCloud_line_point.publish(line_point_msg);
+            sensor_msgs::PointCloud2 line_point_msg;
+            pcl::toROSMsg(*line_point_Cloud, line_point_msg);
+            line_point_msg.header.stamp = cloudHeader.stamp;
+            line_point_msg.header.frame_id = "/livox";
+            pubLaserCloud_line_point.publish(line_point_msg);
 
-            // pcl::toROSMsg(*line_Cloud, line_point_msg);
-            // line_point_msg.header.stamp = cloudHeader.stamp;
-            // line_point_msg.header.frame_id = "/livox";
-            // pubLaserCloud_line.publish(line_point_msg);
+            pcl::toROSMsg(*line_Cloud, line_point_msg);
+            line_point_msg.header.stamp = cloudHeader.stamp;
+            line_point_msg.header.frame_id = "/livox";
+            pubLaserCloud_line.publish(line_point_msg);
         }
     }
 
@@ -1490,13 +1570,15 @@ public:
     {
         std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
         // 如果有新数据进来则执行，否则不执行任何操作
-        if (newSegmentedCloud && newSegmentedCloudInfo && newGroundCloud &&
+        if (newSegmentedCloud && newSegmentedCloudInfo && newGroundCloud && newPlaneEqu &&
             std::abs(timeNewSegmentedCloudInfo - timeNewSegmentedCloud) < 0.05 &&
-            std::abs(timeNewSegmentedCloudInfo - timeNewGroundCloud) < 0.05 ){
+            std::abs(timeNewSegmentedCloudInfo - timeNewGroundCloud) < 0.05 &&
+            std::abs(timeNewSegmentedCloudInfo - timePlaneEqu) < 0.05){
 
             newSegmentedCloud = false;
             newSegmentedCloudInfo = false;
             newGroundCloud = false;
+            newPlaneEqu = false;
         }else{
             return;
         }

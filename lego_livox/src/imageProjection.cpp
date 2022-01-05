@@ -26,6 +26,8 @@ private:
 
     ros::Publisher pubMarkerArray;
 
+    ros::Publisher pubPlaneEquation;
+
     pcl::PointCloud<PointType>::Ptr laserCloudIn; //雷达直接传出的点云
 
     pcl::PointCloud<PointType>::Ptr fullCloud; //投影后的点云
@@ -108,6 +110,8 @@ public:
         pubClusterCloud = nh.advertise<sensor_msgs::PointCloud2> ("/cluster_cloud", 1);
 
         pubMarkerArray = nh.advertise<visualization_msgs::MarkerArray>("/TEXT_VIEW_ARRAY", 10);
+
+        pubPlaneEquation = nh.advertise<std_msgs::Float64MultiArray>("/plane_equation", 1);
 
         nanPoint.x = std::numeric_limits<float>::quiet_NaN();
         nanPoint.y = std::numeric_limits<float>::quiet_NaN();
@@ -535,6 +539,16 @@ void estimate_plane_(void){
                 }
             }
         }
+
+        std_msgs::Float64MultiArray planeMsg;
+        planeMsg.data.push_back(cloudHeader.stamp.toSec());
+        planeMsg.data.push_back(normal_(0, 0));
+        planeMsg.data.push_back(normal_(1, 0));
+        planeMsg.data.push_back(normal_(2, 0));
+        planeMsg.data.push_back(d_);
+        pubPlaneEquation.publish(planeMsg);
+
+        // std::cout<<"normal_ : "<<normal_.transpose()<<", d_ : "<<d_<<std::endl;
         for(auto p:groundCloudSeeds->points)
         {
             groundCloud->push_back(p);

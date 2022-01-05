@@ -761,7 +761,7 @@ mapOptimization():
                     //增加权重，距离越远，影响影子越小
                     s = 1 - 0.9 * fabs(ld2);
 
-                    if (s > 0.1) {
+                    if (s > 0.2) {
                         coeff.x = s * la;
                         coeff.y = s * lb;
                         coeff.z = s * lc;
@@ -861,10 +861,10 @@ mapOptimization():
                     // maxDis = std::max(maxDis, pd2);
                     float s;
                     // 加上影响因子
-                    s = 1 - 0.9 * fabs(pd2)/ sqrt(sqrt(pointSel.x * pointSel.x
-                            + pointSel.y * pointSel.y + pointSel.z * pointSel.z));
+                    s = 1 - 0.9 * fabs(pd2)/ sqrt(sqrt(pointOri.x * pointOri.x
+                            + pointOri.y * pointOri.y + pointOri.z * pointOri.z));
 
-                    if (s > 0.1) {
+                    if (s > 0.2) {
                         // [x,y,z]是整个平面的单位法量
                         // intensity是平面外一点到该平面的距离
                         coeff.x = s * pa;
