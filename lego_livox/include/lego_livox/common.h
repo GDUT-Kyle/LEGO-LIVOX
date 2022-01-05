@@ -43,6 +43,7 @@
 #include <sensor_msgs/Imu.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <nav_msgs/Odometry.h>
+#include <std_msgs/Float64MultiArray.h>
 
 #include "cloud_msgs/cloud_info.h"
 
@@ -116,7 +117,7 @@ extern const float th_seeds = 0.5;
 extern const int num_iter = 3;
 extern const float th_dist = 0.2;
 
-extern const float DISTANCE_SQ_THRESHOLD = 3.0;
+extern const float DISTANCE_SQ_THRESHOLD = 25.0;
 
 extern const float ext_livox[] = {0.0, 0.0, 0.0, 0.0, 0.07, 0.0};
 
