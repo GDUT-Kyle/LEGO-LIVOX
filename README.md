@@ -3,9 +3,9 @@
 
 ___
 
-![](/home/kyle/ros/livox_ws/src/LEGO-LIVOX/lego_livox/pic/gdut.png)
+![](./lego_livox/pic/gdut.png)
 
-![](/home/kyle/ros/livox_ws/src/LEGO-LIVOX/lego_livox/pic/map_demo.png)
+![](./lego_livox/pic/map_demo.png)
 
 将LeGO LOAM的思路迁移到大疆Livox Horizon激光雷达上，从而实现轻量化的激光SLAM系统。本项目在算法上的创新性贡献不大，但是在代码实现方面有如下几点改善：
 
@@ -56,7 +56,7 @@ roslaunch lego_livox lins_slam.launch
 rosbag play 2020_parking_lot.bag --clock
 ```
 
-![](/home/kyle/ros/livox_ws/src/LEGO-LIVOX/lego_livox/pic/bag_test.png)
+![](./lego_livox/pic/bag_test.png)
 
 ### 3. 实时测试
 
