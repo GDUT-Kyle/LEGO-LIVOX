@@ -19,7 +19,7 @@ ___
 
 - [x] 前端里程计关于`pitch`，`roll`以及`tz`的计算
 
-  我们之前花了较大力气进行地面拟合和提取，得到较为准确的地面的平面方程。所以在前端部分直接通过两次扫描的地面方程进行`pitch`，`roll`以及`tz`的计算，没有想Lego-loam那样进行ICP配准。
+  我们之前花了较大力气进行地面拟合和提取，得到较为准确的地面的平面方程。所以在前端部分直接通过两次扫描的地面方程进行`pitch`，`roll`以及`tz`的计算，没有像Lego-loam那样进行ICP配准。
 
 - [x] 使用右扰动模型推导ICP配准的雅克比
 
@@ -88,3 +88,11 @@ roslaunch lego_livox lins_slam.launch
 [Run_based_segmentation](https://github.com/VincentCheungM/Run_based_segmentation)
 
 《视觉SLAM十四讲：从理论到实践》
+
+本人博客：https://blog.csdn.net/m0_38144614?spm=1001.2014.3001.5343
+
+### 6. 致谢
+
+https://blog.mchook.cn/
+
+https://blog.csdn.net/Kamfai_Row?spm=1001.2014.3001.5509
