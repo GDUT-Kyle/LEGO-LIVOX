@@ -49,17 +49,24 @@ Visualization Manager:
         Y: 0
         Z: 0
       Plane: XY
-      Plane Cell Count: 100
+      Plane Cell Count: 200
       Reference Frame: <Fixed Frame>
       Value: true
     - Class: rviz/Axes
       Enabled: true
-      Length: 2
+      Length: 1
       Name: Livox
-      Radius: 0.30000001192092896
+      Radius: 0.20000000298023224
       Reference Frame: livox
       Value: true
-    - Alpha: 1
+    - Class: rviz/Axes
+      Enabled: false
+      Length: 1
+      Name: Odomety
+      Radius: 0.10000000149011612
+      Reference Frame: camera_odom
+      Value: false
+    - Alpha: 0
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
         Max Value: 10
@@ -71,7 +78,7 @@ Visualization Manager:
       Color: 255; 255; 255
       Color Transformer: FlatColor
       Decay Time: 0
-      Enabled: false
+      Enabled: true
       Invert Rainbow: false
       Max Color: 255; 255; 255
       Min Color: 0; 0; 0
@@ -86,7 +93,7 @@ Visualization Manager:
       Unreliable: false
       Use Fixed Frame: true
       Use rainbow: true
-      Value: false
+      Value: true
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
@@ -99,7 +106,7 @@ Visualization Manager:
       Color: 255; 255; 255
       Color Transformer: Intensity
       Decay Time: 0
-      Enabled: false
+      Enabled: true
       Invert Rainbow: false
       Max Color: 255; 255; 255
       Min Color: 0; 0; 0
@@ -114,7 +121,7 @@ Visualization Manager:
       Unreliable: false
       Use Fixed Frame: true
       Use rainbow: true
-      Value: false
+      Value: true
     - Alpha: 0.10000000149011612
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
@@ -183,7 +190,7 @@ Visualization Manager:
       Color: 239; 41; 41
       Color Transformer: FlatColor
       Decay Time: 0
-      Enabled: true
+      Enabled: false
       Invert Rainbow: false
       Max Color: 255; 255; 255
       Min Color: 0; 0; 0
@@ -198,7 +205,7 @@ Visualization Manager:
       Unreliable: false
       Use Fixed Frame: true
       Use rainbow: true
-      Value: true
+      Value: false
     - Alpha: 0.800000011920929
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
@@ -211,7 +218,7 @@ Visualization Manager:
       Color: 252; 233; 79
       Color Transformer: FlatColor
       Decay Time: 0
-      Enabled: true
+      Enabled: false
       Invert Rainbow: false
       Max Color: 255; 255; 255
       Min Color: 0; 0; 0
@@ -226,7 +233,7 @@ Visualization Manager:
       Unreliable: false
       Use Fixed Frame: true
       Use rainbow: true
-      Value: true
+      Value: false
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
@@ -357,7 +364,7 @@ Visualization Manager:
           Value: true
         Value: true
       Enabled: false
-      Keep: 3000
+      Keep: 100
       Name: /laser_odom_to_init
       Position Tolerance: 0.10000000149011612
       Shape:
@@ -547,6 +554,90 @@ Visualization Manager:
       Use Fixed Frame: true
       Use rainbow: true
       Value: false
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud2
+      Color: 230; 18; 238
+      Color Transformer: FlatColor
+      Decay Time: 0
+      Enabled: false
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Min Color: 0; 0; 0
+      Name: ground_downsize
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 5
+      Size (m): 0.009999999776482582
+      Style: Points
+      Topic: /ground_downsize
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: false
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 8.090226173400879
+        Min Value: -0.9288582801818848
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud2
+      Color: 239; 41; 41
+      Color Transformer: FlatColor
+      Decay Time: 0
+      Enabled: false
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Min Color: 0; 0; 0
+      Name: line
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.009999999776482582
+      Style: Points
+      Topic: /line
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: false
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud2
+      Color: 138; 226; 52
+      Color Transformer: FlatColor
+      Decay Time: 0
+      Enabled: false
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Min Color: 0; 0; 0
+      Name: line_point
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.009999999776482582
+      Style: Points
+      Topic: /line_point
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: false
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -575,7 +666,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 35.35803985595703
+      Distance: 47.38926696777344
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -590,10 +681,10 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.6197973489761353
+      Pitch: 0.6047974824905396
       Target Frame: livox
       Value: Orbit (rviz)
-      Yaw: 0.8053945899009705
+      Yaw: 4.700360298156738
     Saved: ~
 Window Geometry:
   Displays:

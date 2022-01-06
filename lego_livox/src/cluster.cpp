@@ -63,63 +63,6 @@ Eigen::Vector3f Cluster::GetEigenValues()
   return eigen_values_;
 }
 
-// void Cluster::ToROSMessage(std_msgs::Header in_ros_header, autoware_msgs::CloudCluster &out_cluster_message)
-// {
-//   sensor_msgs::PointCloud2 cloud_msg;
-
-//   pcl::toROSMsg(*(this->GetCloud()), cloud_msg);
-//   cloud_msg.header = in_ros_header;
-
-//   out_cluster_message.header = in_ros_header;
-
-//   out_cluster_message.cloud = cloud_msg;
-//   out_cluster_message.min_point.header = in_ros_header;
-//   out_cluster_message.min_point.point.x = this->GetMinPoint().x;
-//   out_cluster_message.min_point.point.y = this->GetMinPoint().y;
-//   out_cluster_message.min_point.point.z = this->GetMinPoint().z;
-
-//   out_cluster_message.max_point.header = in_ros_header;
-//   out_cluster_message.max_point.point.x = this->GetMaxPoint().x;
-//   out_cluster_message.max_point.point.y = this->GetMaxPoint().y;
-//   out_cluster_message.max_point.point.z = this->GetMaxPoint().z;
-
-//   out_cluster_message.avg_point.header = in_ros_header;
-//   out_cluster_message.avg_point.point.x = this->GetAveragePoint().x;
-//   out_cluster_message.avg_point.point.y = this->GetAveragePoint().y;
-//   out_cluster_message.avg_point.point.z = this->GetAveragePoint().z;
-
-//   out_cluster_message.centroid_point.header = in_ros_header;
-//   out_cluster_message.centroid_point.point.x = this->GetCentroid().x;
-//   out_cluster_message.centroid_point.point.y = this->GetCentroid().y;
-//   out_cluster_message.centroid_point.point.z = this->GetCentroid().z;
-
-//   out_cluster_message.estimated_angle = this->GetOrientationAngle();
-
-//   out_cluster_message.dimensions = this->GetBoundingBox().dimensions;
-
-//   out_cluster_message.bounding_box = this->GetBoundingBox();
-
-//   out_cluster_message.convex_hull = this->GetPolygon();
-
-//   Eigen::Vector3f eigen_values = this->GetEigenValues();
-//   out_cluster_message.eigen_values.x = eigen_values.x();
-//   out_cluster_message.eigen_values.y = eigen_values.y();
-//   out_cluster_message.eigen_values.z = eigen_values.z();
-
-//   Eigen::Matrix3f eigen_vectors = this->GetEigenVectors();
-//   for (unsigned int i = 0; i < 3; i++)
-//   {
-//     geometry_msgs::Vector3 eigen_vector;
-//     eigen_vector.x = eigen_vectors(i, 0);
-//     eigen_vector.y = eigen_vectors(i, 1);
-//     eigen_vector.z = eigen_vectors(i, 2);
-//     out_cluster_message.eigen_vectors.push_back(eigen_vector);
-//   }
-
-//   /*std::vector<float> fpfh_descriptor = GetFpfhDescriptor(8, 0.3, 0.3);
-//   out_cluster_message.fpfh_descriptor.data = fpfh_descriptor;*/
-// }
-
 void Cluster::SetCloud(const pcl::PointCloud<PointType>::Ptr in_origin_cloud_ptr,
                        const std::vector<int>& in_cluster_indices, std_msgs::Header in_ros_header, int in_id, int in_r,
                        int in_g, int in_b, std::string in_label, bool in_estimate_pose)
@@ -205,15 +148,6 @@ void Cluster::SetCloud(const pcl::PointCloud<PointType>::Ptr in_origin_cloud_ptr
   width_ = max_point_.y - min_point_.y;
   height_ = max_point_.z - min_point_.z;
 
-  // bounding_box_.header = in_ros_header;
-
-  // bounding_box_.pose.position.x = min_point_.x + length_ / 2;
-  // bounding_box_.pose.position.y = min_point_.y + width_ / 2;
-  // bounding_box_.pose.position.z = min_point_.z + height_ / 2;
-
-  // bounding_box_.dimensions.x = ((length_ < 0) ? -1 * length_ : length_);
-  // bounding_box_.dimensions.y = ((width_ < 0) ? -1 * width_ : width_);
-  // bounding_box_.dimensions.z = ((height_ < 0) ? -1 * height_ : height_);
 
   // pose estimation
   double rz = 0;
@@ -250,97 +184,17 @@ void Cluster::SetCloud(const pcl::PointCloud<PointType>::Ptr in_origin_cloud_ptr
       point.z = max_point_.z;
       polygon_.polygon.points.push_back(point);
     }
-    // if (in_estimate_pose)
-    // {
-    //   cv::RotatedRect box = minAreaRect(hull);
-    //   rz = box.angle * 3.14 / 180;
-    //   bounding_box_.pose.position.x = box.center.x;
-    //   bounding_box_.pose.position.y = box.center.y;
-    //   bounding_box_.dimensions.x = box.size.width;
-    //   bounding_box_.dimensions.y = box.size.height;
-    // }
   }
-
-  // set bounding box direction
-  // tf::Quaternion quat = tf::createQuaternionFromRPY(0.0, 0.0, rz);
-  // tf::quaternionTFToMsg(quat, bounding_box_.pose.orientation);
 
   current_cluster->width = current_cluster->points.size();
   current_cluster->height = 1;
   current_cluster->is_dense = true;
 
-  // Get EigenValues, eigenvectors
-  // if (current_cluster->points.size() > 3)
-  // {
-  //   pcl::PCA<PointType> current_cluster_pca;
-  //   pcl::PointCloud<PointType>::Ptr current_cluster_mono(new pcl::PointCloud<PointType>);
-
-  //   pcl::copyPointCloud<pcl::PointXYZRGB, PointType>(*current_cluster, *current_cluster_mono);
-
-  //   current_cluster_pca.setInputCloud(current_cluster_mono);
-  //   eigen_vectors_ = current_cluster_pca.getEigenVectors();
-  //   eigen_values_ = current_cluster_pca.getEigenValues();
-  // }
 
   valid_cluster_ = true;
   pointcloud_ = current_cluster;
 }
 
-// std::vector<float> Cluster::GetFpfhDescriptor(const unsigned int& in_ompnum_threads,
-//                                               const double& in_normal_search_radius,
-//                                               const double& in_fpfh_search_radius)
-// {
-//   std::vector<float> cluster_fpfh_histogram(33, 0.0);
-
-//   pcl::search::KdTree<pcl::PointXYZRGB>::Ptr norm_tree(new pcl::search::KdTree<pcl::PointXYZRGB>);
-//   if (pointcloud_->points.size() > 0)
-//     norm_tree->setInputCloud(pointcloud_);
-
-//   pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>);
-//   pcl::NormalEstimationOMP<pcl::PointXYZRGB, pcl::Normal> normal_estimation;
-//   normal_estimation.setNumberOfThreads(in_ompnum_threads);
-//   normal_estimation.setInputCloud(pointcloud_);
-//   normal_estimation.setSearchMethod(norm_tree);
-//   normal_estimation.setViewPoint(std::numeric_limits<float>::max(), std::numeric_limits<float>::max(),
-//                                  std::numeric_limits<float>::max());
-//   normal_estimation.setRadiusSearch(in_normal_search_radius);
-//   normal_estimation.compute(*normals);
-
-//   pcl::PointCloud<pcl::FPFHSignature33>::Ptr fpfh_histograms(new pcl::PointCloud<pcl::FPFHSignature33>());
-
-//   pcl::FPFHEstimationOMP<pcl::PointXYZRGB, pcl::Normal, pcl::FPFHSignature33> fpfh;
-//   fpfh.setNumberOfThreads(in_ompnum_threads);
-//   fpfh.setInputCloud(pointcloud_);
-//   fpfh.setInputNormals(normals);
-//   fpfh.setSearchMethod(norm_tree);
-//   fpfh.setRadiusSearch(in_fpfh_search_radius);
-//   fpfh.compute(*fpfh_histograms);
-
-//   float fpfh_max = std::numeric_limits<float>::min();
-//   float fpfh_min = std::numeric_limits<float>::max();
-
-//   for (unsigned int i = 0; i < fpfh_histograms->size(); i++)  // for each point fpfh
-//   {
-//     for (unsigned int j = 0; j < cluster_fpfh_histogram.size();
-//          j++)  // sum each histogram's bin for all points, get min/max
-//     {
-//       cluster_fpfh_histogram[j] = cluster_fpfh_histogram[j] + fpfh_histograms->points[i].histogram[j];
-//       if (cluster_fpfh_histogram[j] < fpfh_min)
-//         fpfh_min = cluster_fpfh_histogram[j];
-//       if (cluster_fpfh_histogram[j] > fpfh_max)
-//         fpfh_max = cluster_fpfh_histogram[j];
-//     }
-
-//     float fpfh_dif = fpfh_max - fpfh_min;
-//     for (unsigned int j = 0; fpfh_dif > 0 && j < cluster_fpfh_histogram.size();
-//          j++)  // substract the min from each and normalize
-//     {
-//       cluster_fpfh_histogram[j] = (cluster_fpfh_histogram[j] - fpfh_min) / fpfh_dif;
-//     }
-//   }
-
-//   return cluster_fpfh_histogram;
-// }
 
 bool Cluster::IsValid()
 {
