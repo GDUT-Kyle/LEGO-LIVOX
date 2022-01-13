@@ -36,10 +36,12 @@ private:
     ros::Publisher pubHistoryKeyFrames;
     ros::Publisher pubIcpKeyFrames;
     ros::Publisher pubRecentKeyFrames;
+    ros::Publisher pubLaserCloudRGB;
 
     ros::Subscriber subLaserCloudCornerLast;
     ros::Subscriber subLaserCloudSurfLast;
     ros::Subscriber subLaserOdometry;
+    ros::Subscriber subLaserCloud;
 
     nav_msgs::Odometry odomAftMapped;
     tf::StampedTransform aftMappedTrans;
@@ -81,6 +83,8 @@ private:
     pcl::PointCloud<PointType>::Ptr laserCloudCornerLastDS;
     pcl::PointCloud<PointType>::Ptr laserCloudSurfLastDS;
 
+    pcl::PointCloud<PointType>::Ptr laserCloudRawLast;
+
     // pcl::PointCloud<PointType>::Ptr laserCloudOutlierLast;
     // pcl::PointCloud<PointType>::Ptr laserCloudOutlierLastDS;
 
@@ -117,6 +121,8 @@ private:
     pcl::PointCloud<PointType>::Ptr globalMapKeyFrames;
     pcl::PointCloud<PointType>::Ptr globalMapKeyFramesDS;
 
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr laserCloudFullResColor;
+
     std::vector<int> pointSearchInd;
     std::vector<float> pointSearchSqDis;
 
@@ -133,11 +139,13 @@ private:
     double timeLaserOdometry;
     double timeLaserCloudOutlierLast;
     double timeLastGloalMapPublish;
+    double timeLaserCloudRawLast;
 
     bool newLaserCloudCornerLast;
     bool newLaserCloudSurfLast;
     bool newLaserOdometry;
     bool newLaserCloudOutlierLast;
+    bool newLaserCloudRawLast;
 
     float transformLast[6];         // 保存上一次LM优化后的位姿
     Eigen::Quaternionf q_transformLast;
@@ -235,11 +243,14 @@ mapOptimization():
         subLaserCloudSurfLast = nh.subscribe<sensor_msgs::PointCloud2>("/laser_cloud_surf_last", 2, &mapOptimization::laserCloudSurfLastHandler, this);
         // 相机导航坐标系n'的里程计
         subLaserOdometry = nh.subscribe<nav_msgs::Odometry>("/laser_odom_to_init", 5, &mapOptimization::laserOdometryHandler, this);
+        subLaserCloud = nh.subscribe<sensor_msgs::PointCloud2>("/livox_pcl0", 2, &mapOptimization::laserCloudRawLastHandler, this);
 
         // 发布的
         pubHistoryKeyFrames = nh.advertise<sensor_msgs::PointCloud2>("/history_cloud", 2);
         pubIcpKeyFrames = nh.advertise<sensor_msgs::PointCloud2>("/corrected_cloud", 2);
         pubRecentKeyFrames = nh.advertise<sensor_msgs::PointCloud2>("/recent_cloud", 2);
+
+        pubLaserCloudRGB = nh.advertise<sensor_msgs::PointCloud2>("/rgb_map_pcl", 100);
 
         // 设置滤波时创建的体素大小为0.2m/0.4m立方体,下面的单位为m
         downSizeFilterCorner.setLeafSize(0.2, 0.2, 0.2);
@@ -284,6 +295,8 @@ mapOptimization():
         laserCloudSurfTotalLast.reset(new pcl::PointCloud<PointType>());
         laserCloudSurfTotalLastDS.reset(new pcl::PointCloud<PointType>());
 
+        laserCloudRawLast.reset(new pcl::PointCloud<PointType>());
+
         laserCloudOri.reset(new pcl::PointCloud<PointType>());
         coeffSel.reset(new pcl::PointCloud<PointType>());
 
@@ -311,11 +324,14 @@ mapOptimization():
         globalMapKeyFrames.reset(new pcl::PointCloud<PointType>());
         globalMapKeyFramesDS.reset(new pcl::PointCloud<PointType>());
 
+        laserCloudFullResColor.reset(new pcl::PointCloud<pcl::PointXYZRGB>());
+
         timeLaserCloudCornerLast = 0;
         timeLaserCloudSurfLast = 0;
         timeLaserOdometry = 0;
         timeLaserCloudOutlierLast = 0;
         timeLastGloalMapPublish = 0;
+        timeLaserCloudRawLast = 0;
 
         timeLastProcessing = -1;
 
@@ -324,6 +340,7 @@ mapOptimization():
 
         newLaserOdometry = false;
         newLaserCloudOutlierLast = false;
+        newLaserCloudRawLast = false;
 
         for (int i = 0; i < 6; ++i){
             transformLast[i] = 0;
@@ -380,6 +397,14 @@ mapOptimization():
         aLoopIsClosed = false;
 
         latestFrameID = 0;
+    }
+
+    void laserCloudRawLastHandler(const sensor_msgs::PointCloud2ConstPtr& msg)
+    {
+        timeLaserCloudRawLast = msg->header.stamp.toSec();
+        laserCloudRawLast->clear();
+        pcl::fromROSMsg(*msg, *laserCloudRawLast);
+        newLaserCloudRawLast = true;
     }
 
     void laserCloudCornerLastHandler(const sensor_msgs::PointCloud2ConstPtr& msg){
@@ -1553,6 +1578,36 @@ mapOptimization():
         surfCloudKeyFrames.push_back(thisSurfKeyFrame);
     }
 
+    void RGBpointAssociateToMap(PointType const *const pi,
+                            pcl::PointXYZRGB *const po) {
+        Eigen::Vector3d point_curr(pi->x, pi->y, pi->z);
+        po->x = point_curr.x();
+        po->y = point_curr.y();
+        po->z = point_curr.z();
+        int reflection_map = pi->curvature * 1000;
+        if (reflection_map < 30) {
+            int green = (reflection_map * 255 / 30);
+            po->r = 0;
+            po->g = green & 0xff;
+            po->b = 0xff;
+        } else if (reflection_map < 90) {
+            int blue = (((90 - reflection_map) * 255) / 60);
+            po->r = 0x0;
+            po->g = 0xff;
+            po->b = blue & 0xff;
+        } else if (reflection_map < 150) {
+            int red = ((reflection_map - 90) * 255 / 60);
+            po->r = red & 0xff;
+            po->g = 0xff;
+            po->b = 0x0;
+        } else {
+            int green = (((255 - reflection_map) * 255) / (255 - 150));
+            po->r = 0xff;
+            po->g = green & 0xff;
+            po->b = 0;
+        }
+    }
+
     void publishTF(){
         // geometry_msgs::Quaternion geoQuat = tf::createQuaternionMsgFromRollPitchYaw
         //                           (transformAftMapped[2], -transformAftMapped[0], -transformAftMapped[1]);
@@ -1578,6 +1633,22 @@ mapOptimization():
                                                 v_transformAftMapped.y(), 
                                                 v_transformAftMapped.z()));
         tfBroadcaster.sendTransform(aftMappedTrans);
+
+        if(pubLaserCloudRGB.getNumSubscribers() != 0)
+        {
+            laserCloudFullResColor->clear();
+            int laserCloudFullResNum = laserCloudRawLast->points.size();
+            for (int i = 0; i < laserCloudFullResNum; i++) {
+                pcl::PointXYZRGB temp_point;
+                RGBpointAssociateToMap(&laserCloudRawLast->points[i], &temp_point);
+                laserCloudFullResColor->push_back(temp_point);
+            }
+            sensor_msgs::PointCloud2 laserCloudFullRes3;
+            pcl::toROSMsg(*laserCloudFullResColor, laserCloudFullRes3);
+            laserCloudFullRes3.header.stamp = ros::Time().fromSec(timeLaserOdometry);
+            laserCloudFullRes3.header.frame_id = "/livox";
+            pubLaserCloudRGB.publish(laserCloudFullRes3);
+        }
     }
 
     void publishKeyPosesAndFrames(){
@@ -1638,6 +1709,7 @@ mapOptimization():
 
         if (newLaserCloudCornerLast  && std::abs(timeLaserCloudCornerLast  - timeLaserOdometry) < 0.005 &&
             newLaserCloudSurfLast    && std::abs(timeLaserCloudSurfLast    - timeLaserOdometry) < 0.005 &&
+            newLaserCloudRawLast  && std::abs(timeLaserCloudRawLast  - timeLaserOdometry) < 0.005 &&
             newLaserOdometry)
         {
 
@@ -1645,6 +1717,7 @@ mapOptimization():
             newLaserCloudCornerLast = false; 
             newLaserCloudSurfLast = false;  
             newLaserOdometry = false;
+            newLaserCloudRawLast = false;
 
             std::lock_guard<std::mutex> lock(mtx);
 
