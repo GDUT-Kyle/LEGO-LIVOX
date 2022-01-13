@@ -436,6 +436,207 @@ mapOptimization():
         tfBroadcaster.sendTransform(aftMappedOdomTrans);
     }
 
+    void loopClosureThread(){
+        if (loopClosureEnableFlag == false)
+            return;
+
+        ros::Rate rate(1);
+        while (ros::ok()){
+            rate.sleep();
+            performLoopClosure();
+        }
+    }
+
+    bool detectLoopClosure(){
+
+        latestSurfKeyFrameCloud->clear();
+        nearHistorySurfKeyFrameCloud->clear();
+        nearHistorySurfKeyFrameCloudDS->clear();
+
+        // 资源分配时初始化
+        // 在互斥量被析构前不解锁
+        std::lock_guard<std::mutex> lock(mtx);
+
+        std::vector<int> pointSearchIndLoop;
+        std::vector<float> pointSearchSqDisLoop;
+        // 关键帧位置构建kd-tree
+        kdtreeHistoryKeyPoses->setInputCloud(cloudKeyPoses3D);
+        // 进行半径historyKeyframeSearchRadius内的邻域搜索，
+        // currentRobotPosPoint：需要查询的点，这里取最新优化后的关键帧位置
+        // pointSearchIndLoop：搜索完的邻域点对应的索引
+        // pointSearchSqDisLoop：搜索完的每个邻域点与当前点之间的欧式距离
+        // 0：返回的邻域个数，为0表示返回全部的邻域点
+        kdtreeHistoryKeyPoses->radiusSearch(currentRobotPosPoint, historyKeyframeSearchRadius, pointSearchIndLoop, pointSearchSqDisLoop, 0);
+        
+        closestHistoryFrameID = -1;
+        // 遍历kd-tree最近临搜索到的点
+        for (int i = 0; i < pointSearchIndLoop.size(); ++i){
+            int id = pointSearchIndLoop[i];
+            // 需要找到，两个时间差值大于30秒
+            // 时间太短的不认为是回环
+            if (abs(cloudKeyPoses6D->points[id].time - timeLaserOdometry) > 30.0){
+                closestHistoryFrameID = id;
+                break;
+            }
+        }
+        if (closestHistoryFrameID == -1){
+            // 找到的点和当前时间上没有超过30秒的
+            return false;
+        }
+
+        // 取最新优化后的关键帧的cornerCloudKeyFrames和surfCloudKeyFrames
+        latestFrameIDLoopCloure = cloudKeyPoses3D->points.size() - 1;
+        // 点云的xyz坐标进行坐标系变换(分别绕xyz轴旋转)
+        // 根据对应的位姿，将边缘线点和平面点转换到世界坐标系下，并合并在一起
+        *latestSurfKeyFrameCloud += *transformPointCloud(cornerCloudKeyFrames[latestFrameIDLoopCloure], &cloudKeyPoses6D->points[latestFrameIDLoopCloure]);
+        *latestSurfKeyFrameCloud += *transformPointCloud(surfCloudKeyFrames[latestFrameIDLoopCloure],   &cloudKeyPoses6D->points[latestFrameIDLoopCloure]);
+
+        // latestSurfKeyFrameCloud中存储的是下面公式计算后的index(intensity):
+        // thisPoint.intensity = (float)rowIdn + (float)columnIdn / 10000.0;
+        // 滤掉latestSurfKeyFrameCloud中index<0的点??? index值会小于0?
+        pcl::PointCloud<PointType>::Ptr hahaCloud(new pcl::PointCloud<PointType>());
+        // 遍历合并完的latestSurfKeyFrameCloud
+        int cloudSize = latestSurfKeyFrameCloud->points.size();
+        for (int i = 0; i < cloudSize; ++i){
+            // intensity不小于0的点放进hahaCloud队列
+            // 初始化时intensity是-1，滤掉那些点
+            if ((int)latestSurfKeyFrameCloud->points[i].intensity >= 0){
+                hahaCloud->push_back(latestSurfKeyFrameCloud->points[i]);
+            }
+        }
+        latestSurfKeyFrameCloud->clear();
+        *latestSurfKeyFrameCloud   = *hahaCloud;
+
+        // historyKeyframeSearchNum在utility.h中定义为25
+        // 取闭环候选关键帧的 前后各25帧，进行拼接
+        for (int j = -historyKeyframeSearchNum; j <= historyKeyframeSearchNum; ++j){
+            if (closestHistoryFrameID + j < 0 || closestHistoryFrameID + j > latestFrameIDLoopCloure)
+                continue;
+            // 要求closestHistoryFrameID + j在0到cloudKeyPoses3D->points.size()-1之间,不能超过索引
+            // 这些点云已经转换到世界坐标系
+            *nearHistorySurfKeyFrameCloud += *transformPointCloud(cornerCloudKeyFrames[closestHistoryFrameID+j], &cloudKeyPoses6D->points[closestHistoryFrameID+j]);
+            *nearHistorySurfKeyFrameCloud += *transformPointCloud(surfCloudKeyFrames[closestHistoryFrameID+j],   &cloudKeyPoses6D->points[closestHistoryFrameID+j]);
+        }
+
+        // 下采样滤波减少数据量
+        downSizeFilterHistoryKeyFrames.setInputCloud(nearHistorySurfKeyFrameCloud);
+        downSizeFilterHistoryKeyFrames.filter(*nearHistorySurfKeyFrameCloudDS);
+
+        if (pubHistoryKeyFrames.getNumSubscribers() != 0){
+            sensor_msgs::PointCloud2 cloudMsgTemp;
+            pcl::toROSMsg(*nearHistorySurfKeyFrameCloudDS, cloudMsgTemp);
+            cloudMsgTemp.header.stamp = ros::Time().fromSec(timeLaserOdometry);
+            cloudMsgTemp.header.frame_id = "/camera_init";
+            pubHistoryKeyFrames.publish(cloudMsgTemp);
+        }
+        // 返回true，表示可能存在闭环
+        return true;
+    }
+
+    Eigen::Affine3f pclPointToAffine3fCameraToLidar(myPointTypePose thisPoint){
+    	// return pcl::getTransformation(thisPoint.z, thisPoint.x, thisPoint.y, thisPoint.yaw, thisPoint.roll, thisPoint.pitch);
+        Eigen::Affine3f mat;
+        mat.setIdentity();
+        mat.pretranslate(Eigen::Vector3f(thisPoint.x, thisPoint.y, thisPoint.z));
+        mat.rotate(Eigen::Quaternionf(thisPoint.qw, thisPoint.qx, thisPoint.qy, thisPoint.qz));
+        return mat;
+    }
+
+    Pose3 pclPointTogtsamPose3(myPointTypePose thisPoint){
+    	// return Pose3(Rot3::RzRyRx(double(thisPoint.yaw), double(thisPoint.roll), double(thisPoint.pitch)),
+        //                    Point3(double(thisPoint.z),   double(thisPoint.x),    double(thisPoint.y)));
+        return Pose3(Rot3(Eigen::Quaternionf(thisPoint.qw, thisPoint.qx, thisPoint.qy, thisPoint.qz).cast<double>()), 
+                Point3(Eigen::Vector3f(thisPoint.x, thisPoint.y, thisPoint.z).cast<double>()));
+    }
+
+    void performLoopClosure(){
+        // 如果关键帧为空，返回
+        if (cloudKeyPoses3D->points.empty() == true)
+            return;
+
+        if (potentialLoopFlag == false){
+            // 进行回环检测
+            if (detectLoopClosure() == true){
+                potentialLoopFlag = true;
+                timeSaveFirstCurrentScanForLoopClosure = timeLaserOdometry;
+            }
+            if (potentialLoopFlag == false)
+                return;
+        }
+
+        potentialLoopFlag = false;
+
+        pcl::IterativeClosestPoint<PointType, PointType> icp;
+        icp.setMaxCorrespondenceDistance(100);  //Set the maximum distance threshold between two correspondent points in source <-> target. If the distance is larger than this threshold, the points will be ignored in the alignment process.
+        icp.setMaximumIterations(100);          //最大迭代次数
+        icp.setTransformationEpsilon(1e-6);     //设置前后两次迭代的转换矩阵的最大容差（epsilion），一旦两次迭代小于这个最大容差，则认为已经收敛到最优解，迭代停止。迭代停止条件之二，默认值为：0
+        icp.setEuclideanFitnessEpsilon(1e-6);   //设置前后两次迭代的点对的欧式距离均值的最大容差，迭代终止条件之三，默认值为：-std::numeric_limits::max ()
+        // 设置RANSAC运行次数
+        icp.setRANSACIterations(0);
+
+        // 最新优化后的关键帧对应的点云(在漂移世界坐标系上)
+        icp.setInputSource(latestSurfKeyFrameCloud);
+        // 使用detectLoopClosure()函数中下采样刚刚更新nearHistorySurfKeyFrameCloudDS
+        // nearHistorySurfKeyFrameCloudDS: 闭环候选关键帧附近的帧构成的局部地图(在世界坐标系上)
+        icp.setInputTarget(nearHistorySurfKeyFrameCloudDS);
+        pcl::PointCloud<PointType>::Ptr unused_result(new pcl::PointCloud<PointType>());
+        // 进行icp点云对齐
+        icp.align(*unused_result);
+
+        // 接受条件
+        if (icp.hasConverged() == false || icp.getFitnessScore() > historyKeyframeFitnessScore)
+            return;
+
+        // 以下在点云icp收敛并且噪声量在一定范围内进行
+        if (pubIcpKeyFrames.getNumSubscribers() != 0){
+            pcl::PointCloud<PointType>::Ptr closed_cloud(new pcl::PointCloud<PointType>());
+			// icp.getFinalTransformation()的返回值是Eigen::Matrix<Scalar, 4, 4>
+            pcl::transformPointCloud (*latestSurfKeyFrameCloud, *closed_cloud, icp.getFinalTransformation());
+            sensor_msgs::PointCloud2 cloudMsgTemp;
+            pcl::toROSMsg(*closed_cloud, cloudMsgTemp);
+            cloudMsgTemp.header.stamp = ros::Time().fromSec(timeLaserOdometry);
+            cloudMsgTemp.header.frame_id = "/camera_init";
+            pubIcpKeyFrames.publish(cloudMsgTemp);
+        }   
+
+        // 获取配准结果: 从漂移世界坐标系到真世界坐标系的变换
+        // float x, y, z, roll, pitch, yaw;
+        Eigen::Vector3f translation;
+        Eigen::Quaternionf rotation;
+        Eigen::Affine3f correctionCameraFrame;
+        correctionCameraFrame = icp.getFinalTransformation();
+
+        // 取矫正前的关键帧位姿(转换到载体坐标系及导航坐标系n系)
+        // 即当前帧坐标系 到 (漂移)世界坐标系的变换
+        Eigen::Affine3f tWrong = pclPointToAffine3fCameraToLidar(cloudKeyPoses6D->points[latestFrameIDLoopCloure]);
+        // 计算矫正量
+        // tWrong: 矫正前的关键帧 到 世界坐标系的变换 ==> 即当前帧坐标系 到 (漂移)世界坐标系的变换
+        // correctionLidarFrame: 从漂移世界坐标系到真世界坐标系的变换
+        // tCorrect: 当前关键帧在真世界坐标系的位姿
+        Eigen::Affine3f tCorrect = correctionCameraFrame * tWrong;
+        // pcl::getTranslationAndEulerAngles (tCorrect, x, y, z, roll, pitch, yaw);
+        rotation = tCorrect.rotation();
+        translation = tCorrect.translation();
+        // 矫正后的当前最新优化关键帧位姿
+        // gtsam::Pose3 poseFrom = Pose3(Rot3::RzRyRx(roll, pitch, yaw), Point3(x, y, z));
+        gtsam::Pose3 poseFrom = Pose3(Rot3(rotation.cast<double>()), Point3(translation.cast<double>()));
+        // 取闭环关键帧位姿
+        gtsam::Pose3 poseTo = pclPointTogtsamPose3(cloudKeyPoses6D->points[closestHistoryFrameID]);
+        gtsam::Vector Vector6(6);
+        float noiseScore = icp.getFitnessScore();
+        Vector6 << noiseScore, noiseScore, noiseScore, noiseScore, noiseScore, noiseScore;
+        constraintNoise = noiseModel::Diagonal::Variances(Vector6);
+
+        std::lock_guard<std::mutex> lock(mtx);
+        // 因子图加入回环边
+        gtSAMgraph.add(BetweenFactor<Pose3>(latestFrameIDLoopCloure, closestHistoryFrameID, poseFrom.between(poseTo), constraintNoise));
+        isam->update(gtSAMgraph);
+        isam->update();
+        gtSAMgraph.resize(0);
+
+        aLoopIsClosed = true;
+    }
+
     // 将坐标转移到世界坐标系下,得到可用于建图的Lidar坐标，即修改了transformTobeMapped的值
     void transformAssociateToMap()
     {
@@ -478,15 +679,6 @@ mapOptimization():
         pcl::PointCloud<PointType>::Ptr cloudOut(new pcl::PointCloud<PointType>());
         PointType pointTo;
 
-        // Eigen::AngleAxisf rollAngle(
-        //     Eigen::AngleAxisf(tIn->roll, Eigen::Vector3f::UnitX())
-        // );
-        // Eigen::AngleAxisf pitchAngle(
-        //     Eigen::AngleAxisf(tIn->pitch, Eigen::Vector3f::UnitY())
-        // );
-        // Eigen::AngleAxisf yawAngle(
-        //     Eigen::AngleAxisf(tIn->yaw, Eigen::Vector3f::UnitZ())
-        // ); 
         Eigen::Quaternionf q_tIn(tIn->qw, tIn->qx, tIn->qy, tIn->qz);
         Eigen::Vector3f v_tIn(tIn->x, tIn->y, tIn->z);
 
@@ -513,7 +705,47 @@ mapOptimization():
         
         if(loopClosureEnableFlag == true)
         {
+            // recentCornerCloudKeyFrames保存的点云数量太少，则清空后重新塞入新的点云直至数量够
+            if (recentCornerCloudKeyFrames.size() < surroundingKeyframeSearchNum){
+                recentCornerCloudKeyFrames. clear();
+                recentSurfCloudKeyFrames.   clear();
+                int numPoses = cloudKeyPoses3D->points.size();
+                // 从最新的关键帧开始，取关键帧push进recentCornerCloudKeyFrames/recentSurfCloudKeyFrames/recentOutlierCloudKeyFrames
+                for (int i = numPoses-1; i >= 0; --i){
+                    // cloudKeyPoses3D的intensity中存的是索引值?
+                    // 保存的索引值从1开始编号；
+                    int thisKeyInd = (int)cloudKeyPoses3D->points[i].intensity;
+                    myPointTypePose thisTransformation = cloudKeyPoses6D->points[thisKeyInd];
+                    // updateTransformPointCloudSinCos(&thisTransformation);
+                    // 依据上面得到的变换thisTransformation，对cornerCloudKeyFrames，surfCloudKeyFrames，surfCloudKeyFrames
+                    // 进行坐标变换
+                    recentCornerCloudKeyFrames. push_front(transformPointCloud(cornerCloudKeyFrames[thisKeyInd], &thisTransformation));
+                    recentSurfCloudKeyFrames.   push_front(transformPointCloud(surfCloudKeyFrames[thisKeyInd], &thisTransformation));
+                    if (recentCornerCloudKeyFrames.size() >= surroundingKeyframeSearchNum)
+                        break;
+                }
+            }else{
+                // recentCornerCloudKeyFrames中点云保存的数量较多
+                // pop队列最前端的一个，再push后面一个
+                if (latestFrameID != cloudKeyPoses3D->points.size() - 1){
 
+                    recentCornerCloudKeyFrames. pop_front();
+                    recentSurfCloudKeyFrames.   pop_front();
+                    // 为什么要把recentCornerCloudKeyFrames最前面第一个元素弹出?
+                    // (1个而不是好几个或者是全部)?
+                    latestFrameID = cloudKeyPoses3D->points.size() - 1;
+                    myPointTypePose thisTransformation = cloudKeyPoses6D->points[latestFrameID];
+                    recentCornerCloudKeyFrames. push_back(transformPointCloud(cornerCloudKeyFrames[latestFrameID], &thisTransformation));
+                    recentSurfCloudKeyFrames.   push_back(transformPointCloud(surfCloudKeyFrames[latestFrameID], &thisTransformation));
+                }
+            }
+
+            for (int i = 0; i < recentCornerCloudKeyFrames.size(); ++i){
+                // 两个pcl::PointXYZI相加?
+                // 注意这里把recentOutlierCloudKeyFrames也加入到了laserCloudSurfFromMap
+                *laserCloudCornerFromMap += *recentCornerCloudKeyFrames[i];
+                *laserCloudSurfFromMap   += *recentSurfCloudKeyFrames[i];
+            }
         }
         else // 无回环
         {
@@ -1367,6 +1599,34 @@ mapOptimization():
         }
     }
 
+    void correctPoses(){
+    	if (aLoopIsClosed == true){
+            recentCornerCloudKeyFrames. clear();
+            recentSurfCloudKeyFrames.   clear();
+
+            int numPoses = isamCurrentEstimate.size();
+			for (int i = 0; i < numPoses; ++i)
+			{
+				cloudKeyPoses3D->points[i].x = isamCurrentEstimate.at<Pose3>(i).translation().x();
+				cloudKeyPoses3D->points[i].y = isamCurrentEstimate.at<Pose3>(i).translation().y();
+				cloudKeyPoses3D->points[i].z = isamCurrentEstimate.at<Pose3>(i).translation().z();
+
+				cloudKeyPoses6D->points[i].x = cloudKeyPoses3D->points[i].x;
+	            cloudKeyPoses6D->points[i].y = cloudKeyPoses3D->points[i].y;
+	            cloudKeyPoses6D->points[i].z = cloudKeyPoses3D->points[i].z;
+
+                Eigen::Quaternionf q_rotaion = isamCurrentEstimate.at<Pose3>(i).rotation().toQuaternion().normalized().cast<float>();
+                // 
+	            cloudKeyPoses6D->points[i].qw = q_rotaion.w();
+	            cloudKeyPoses6D->points[i].qx = q_rotaion.x();
+	            cloudKeyPoses6D->points[i].qy = q_rotaion.y();
+                cloudKeyPoses6D->points[i].qz = q_rotaion.z();
+			}
+
+	    	aLoopIsClosed = false;
+	    }
+    }
+
     void clearCloud(){
         laserCloudCornerFromMap->clear();
         laserCloudSurfFromMap->clear();
@@ -1409,7 +1669,7 @@ mapOptimization():
                 saveKeyFramesAndFactor();
 
                 //
-                // correctPoses();
+                correctPoses();
 
                 publishTF();
 
@@ -1431,7 +1691,7 @@ int main(int argc, char** argv)
 
     // std::thread 构造函数，将MO作为参数传入构造的线程中使用
     // 回环线程
-    // std::thread loopthread(&mapOptimization::loopClosureThread, &MO);
+    std::thread loopthread(&mapOptimization::loopClosureThread, &MO);
 	
     // 该线程中进行的工作是publishGlobalMap(),将数据发布到ros中，可视化
     // std::thread visualizeMapThread(&mapOptimization::visualizeGlobalMapThread, &MO);
@@ -1446,7 +1706,7 @@ int main(int argc, char** argv)
         rate.sleep();
     }
 
-    // loopthread.join();
+    loopthread.join();
     // visualizeMapThread.join();
 
     return 0;
