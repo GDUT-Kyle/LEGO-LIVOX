@@ -7,9 +7,12 @@
 #include <pcl/segmentation/extract_clusters.h>
 
 #include <pcl/filters/radius_outlier_removal.h>   //半径滤波器头文件
+// #include<pcl/filters/statistical_outlier_removal.h>   //统计滤波器头文件
 
 // #include <pcl/registration/icp.h>
 // #include <pcl/common/transforms.h>
+
+// #define PLANE_EQU
 
 class featureAssociation
 {
@@ -153,6 +156,10 @@ private:
     Eigen::AngleAxisf pitchAngle;
     Eigen::AngleAxisf yawAngle;
     Eigen::Quaternionf q_transformCur;
+    Eigen::AngleAxisf axis_rpAngleLast;
+
+    Eigen::Quaternionf q_transformSum;
+    Eigen::Vector3f v_transformSum;
 
     float imuRollLast, imuPitchLast, imuYawLast;
     float imuShiftFromStartX, imuShiftFromStartY, imuShiftFromStartZ;
@@ -300,6 +307,8 @@ public:
         }
         q_transformCur.setIdentity();
         v_transformCur.setZero();
+        q_transformSum.setIdentity();
+        v_transformSum.setZero();
 
         systemInitedLM = false;
 
@@ -395,11 +404,17 @@ public:
         GoundDownSizeFilter.filter(*surfPointsGroundScanDS);
  
         pcl::RadiusOutlierRemoval<PointType> radiusoutlier;  //创建滤波器
-        
         radiusoutlier.setInputCloud(surfPointsGroundScanDS);    //设置输入点云
-        radiusoutlier.setRadiusSearch(5);     //设置半径为100的范围内找临近点
-        radiusoutlier.setMinNeighborsInRadius(30); //设置查询点的邻域点集数小于2的删除
+        radiusoutlier.setRadiusSearch(3);     //设置半径为100的范围内找临近点
+        radiusoutlier.setMinNeighborsInRadius(40); //设置查询点的邻域点集数小于2的删除
         radiusoutlier.filter(*surfPointsGroundScanDS);
+
+        // pcl::PointCloud<PointType>::Ptr cloud_after_StatisticalRemoval(new pcl::PointCloud<PointType>);//
+        // pcl::StatisticalOutlierRemoval<PointType> Statistical;
+        // Statistical.setInputCloud(surfPointsGroundScanDS);
+        // Statistical.setMeanK(100);//取平均值的临近点数
+        // Statistical.setStddevMulThresh(30);//临近点数数目少于多少时会被舍弃
+        // Statistical.filter(*surfPointsGroundScanDS);
 
         // std::cout<<"surfPointsGroundScanDS : "<<surfPointsGroundScanDS->size()<<std::endl;
 
@@ -890,10 +905,13 @@ public:
                 float s = 1;
                 if (iterCount >= 0) {
                     // 加上影响因子
-                    s = 1 - 0.9 * fabs(pd2);
+                    s = 1 - 1.8 * fabs(pd2)/ sqrt(
+                                sqrt(pointSel.x * pointSel.x+
+                                     pointSel.y * pointSel.y+
+                                     pointSel.z * pointSel.z));
                 }
 
-                if (s > 0.4 && pd2 != 0) {
+                if (s > 0.1 && pd2 != 0) {
                     // [x,y,z]是整个平面的单位法量
                     // intensity是平面外一点到该平面的距离
                     coeff.x = s * pa;
@@ -1039,11 +1057,6 @@ public:
         rollAngle = Eigen::AngleAxisf(transformCur[0], Eigen::Vector3f::UnitX());
         pitchAngle = Eigen::AngleAxisf(transformCur[1], Eigen::Vector3f::UnitY());
         yawAngle = Eigen::AngleAxisf(transformCur[2], Eigen::Vector3f::UnitZ());
-        // Eigen::AngleAxisf Angle = Eigen::AngleAxisf(
-        //     sqrt(transformCur[0]*transformCur[0] + 
-        //         transformCur[1]*transformCur[1] + 
-        //         transformCur[2]*transformCur[2])
-        //     , Eigen::Vector3f(transformCur[0], transformCur[1], transformCur[2]));
         q_transformCur = rollAngle * pitchAngle * yawAngle;
         // q_transformCur = Angle;
     }
@@ -1193,20 +1206,24 @@ public:
             // Delta_x.normalize();
         }
 
-        transformCur[0] += Delta_x[0];
-        transformCur[1] += Delta_x[1];
-        transformCur[5] += Delta_x[2];
+        // transformCur[0] += Delta_x[0];
+        // transformCur[1] += Delta_x[1];
+        // transformCur[5] += Delta_x[2];
 
         // std::cout<<iterCount<<"] "<<"Delta_x : "<<Delta_x.transpose()<<std::endl;
 
-        for(int i=0; i<6; i++){
-            // std::cout<<transformCur[i]<<", ";
-            if(isnan(transformCur[i]))
-                transformCur[i]=0;
-        }
+        // for(int i=0; i<6; i++){
+        //     // std::cout<<transformCur[i]<<", ";
+        //     if(isnan(transformCur[i]))
+        //         transformCur[i]=0;
+        // }
         // std::cout<<std::endl;
 
-        updateTransformCur();
+        // updateTransformCur();
+        v_transformCur.z() = v_transformCur.z()+Delta_x[2];
+        Eigen::Vector3f rpAngle = Eigen::Vector3f(Delta_x[0], Delta_x[1], 0.0);
+        Eigen::AngleAxisf axis_rpAngle(rpAngle.norm(), rpAngle.normalized());
+        q_transformCur = (q_transformCur * axis_rpAngle).normalized();
 
         // 增量dx已经很小了
         // 则返回false，表示迭代完成
@@ -1322,19 +1339,24 @@ public:
 
         // Delta_x = Delta_x;
 
-        transformCur[2] += Delta_x[0];
-        transformCur[3] += Delta_x[1];
-        transformCur[4] += Delta_x[2];
+        // transformCur[2] += Delta_x[0];
+        // transformCur[3] += Delta_x[1];
+        // transformCur[4] += Delta_x[2];
 
         // std::cout<<iterCount<<"] "<<"transformCur : "<<transformCur[2]<<", "<<transformCur[3]<<", "<<transformCur[4]<<", "<<std::endl;
         // std::cout<<iterCount<<"] "<<"Delta_x : "<<Delta_x.transpose()<<std::endl;
 
-        for(int i=0; i<6; i++){
-            if(isnan(transformCur[i]))
-                transformCur[i]=0;
-        }
+        // for(int i=0; i<6; i++){
+        //     if(isnan(transformCur[i]))
+        //         transformCur[i]=0;
+        // }
 
-        updateTransformCur();
+        // updateTransformCur();
+        v_transformCur.x() = v_transformCur.x()+Delta_x[1];
+        v_transformCur.y() = v_transformCur.y()+Delta_x[2];
+        // Eigen::Vector3f yAngle = Eigen::Vector3f(0.0, 0.0, Delta_x[0]);
+        Eigen::AngleAxisf axis_yAngle(Delta_x[0], Eigen::Vector3f::UnitZ());
+        q_transformCur = (q_transformCur * axis_yAngle).normalized();
 
         float deltaR = sqrt(pow(rad2deg(Delta_x(0, 0)), 2));
         float deltaT = sqrt( pow(Delta_x(1, 0) * 100, 2) +
@@ -1353,20 +1375,28 @@ public:
     {
         Eigen::Vector3f NormalCurr = PlaneEqu.block<3, 1>(0, 0);
         float dLast = PlaneEqu(3, 0);
-        float pitchCurr = atan2(NormalCurr.x(), NormalCurr.z());
+        float pitchCurr = atan2(NormalCurr.x(), sqrt(1.0-NormalCurr.x()*NormalCurr.x()));
         float rollCurr = atan2(NormalCurr.y(), NormalCurr.z());
 
         Eigen::Vector3f NormalLast = PlaneEquLast.block<3, 1>(0, 0);
         float dCurr = PlaneEquLast(3, 0);
-        float pitchLast = atan2(NormalLast.x(), NormalLast.z());
+        float pitchLast = atan2(NormalLast.x(), sqrt(1.0-NormalLast.x()*NormalLast.x()));
         float rollLast = atan2(NormalLast.y(), NormalLast.z());
 
         // 更新
-        transformCur[0] = -(rollCurr - rollLast);
-        transformCur[1] = -(pitchCurr - pitchLast);
-        transformCur[5] = -(dCurr-dLast);
-        updateTransformCur();
-        // std::cout<<"roll = "<<transformCur[0]/PI*180<<", "<<"pitch = "<<transformCur[1]/PI*180<<std::endl;
+        // transformCur[0] = -(rollCurr - rollLast);
+        // transformCur[1] = -(pitchCurr - pitchLast);
+        // transformCur[5] = -(dCurr-dLast);
+        // updateTransformCur();
+
+        v_transformCur.z() = -(dCurr-dLast);
+        // Eigen::Vector3f rpAngle = Eigen::Vector3f(-(rollCurr - rollLast), -(pitchCurr - pitchLast), 0.0);
+        Eigen::AngleAxisf axis_rpAngle;
+        axis_rpAngle = Eigen::AngleAxisf(-(rollCurr - rollLast), Eigen::Vector3f::UnitX()) *
+                        Eigen::AngleAxisf(-(pitchCurr - pitchLast), Eigen::Vector3f::UnitY());
+        q_transformCur = (axis_rpAngle * axis_rpAngleLast.inverse() * q_transformCur).normalized();
+        axis_rpAngleLast = axis_rpAngle;
+        // std::cout<<"roll = "<<rollCurr/PI*180<<", "<<"pitch = "<<pitchCurr/PI*180<<std::endl;
 
         PlaneEquLast = PlaneEqu;
     }
@@ -1424,20 +1454,6 @@ public:
     }
 
     void publishCloudsLast(){
-        // 粗糙点
-        // int cornerPointsLessSharpNum = cornerPointsLessSharp->points.size();
-        // for (int i = 0; i < cornerPointsLessSharpNum; i++) {
-        //     // TransformToEnd的作用是将k+1时刻的less特征点转移至k+1时刻的sweep的结束位置处的相机坐标系下
-        //     // [输入]cornerPointsLessSharp: 投影到当前帧扫描起始坐标系(相机坐标系c系)的点
-        //     // [输出]cornerPointsLessSharp: 转换到当前帧扫描结束时相机坐标系c系的点
-        //     TransformToEnd(&cornerPointsLessSharp->points[i], &cornerPointsLessSharp->points[i]);
-        // }
-
-        // // 平面点
-        // int surfPointsLessFlatNum = surfPointsLessFlat->points.size();
-        // for (int i = 0; i < surfPointsLessFlatNum; i++) {
-        //     TransformToEnd(&surfPointsLessFlat->points[i], &surfPointsLessFlat->points[i]);
-        // }
 
         pcl::PointCloud<PointType>::Ptr laserCloudTemp = cornerPointsLessSharp;
         // 最新的cornerPointsLessSharp已经发布出去了，所以它已经没意义了，不过为了节省空间，就让暂存一下数据
@@ -1453,17 +1469,17 @@ public:
         // laserCloudSurfLastNum = laserCloudSurfLast->points.size();
         laserCloudSurfLastNum = surfPointsGroundScan->points.size();
 
+        surfPointsGroundScanLast->clear();
+        *surfPointsGroundScanLast = *surfPointsGroundScan;
+
         if(laserCloudCornerLastNum>10 && laserCloudSurfLastNum>100)
         {
             kdtreeCornerLast->setInputCloud(laserCloudCornerLast);
             #ifdef PLANE_EQU
             // kdtreeSurfLast->setInputCloud(laserCloudSurfLast);
-            kdtreeSurfLast->setInputCloud(surfPointsGroundScan);
+            kdtreeSurfLast->setInputCloud(surfPointsGroundScanLast);
             #endif
         }
-
-        surfPointsGroundScanLast->clear();
-        *surfPointsGroundScanLast = *surfPointsGroundScan;
 
         frameCount++;
 
@@ -1498,71 +1514,74 @@ public:
 
     // 旋转角的累计变化量
     void integrateTransformation(){
-        // 存储odom坐标系下的当前位置
-        // float rx, ry, rz, tx, ty, tz;
+        // // 存储odom坐标系下的当前位置
+        // // float rx, ry, rz, tx, ty, tz;
 
-        // AccumulateRotation作用
-        // 将计算的两帧之间的位姿“累加”起来，获得相对于第一帧的旋转矩阵
-        // transformSum + (-transformCur) =(rx,ry,rz)
-        Eigen::AngleAxisf rollAngle(
-            Eigen::AngleAxisf(transformSum[0], Eigen::Vector3f::UnitX())
-        );
-        Eigen::AngleAxisf pitchAngle(
-            Eigen::AngleAxisf(transformSum[1], Eigen::Vector3f::UnitY())
-        );
-        Eigen::AngleAxisf yawAngle(
-            Eigen::AngleAxisf(transformSum[2], Eigen::Vector3f::UnitZ())
-        ); 
-        // Eigen::AngleAxisf Angle = Eigen::AngleAxisf(
-        //     sqrt(transformSum[0]*transformSum[0] + 
-        //         transformSum[1]*transformSum[1] + 
-        //         transformSum[2]*transformSum[2]),
-        //     Eigen::Vector3f(transformSum[0], transformSum[1], transformSum[2])
+        // // AccumulateRotation作用
+        // // 将计算的两帧之间的位姿“累加”起来，获得相对于第一帧的旋转矩阵
+        // // transformSum + (-transformCur) =(rx,ry,rz)
+        // Eigen::AngleAxisf rollAngle(
+        //     Eigen::AngleAxisf(transformSum[0], Eigen::Vector3f::UnitX())
         // );
-        Eigen::Quaternionf q_transformSum;
-        q_transformSum = rollAngle * pitchAngle * yawAngle;
-        // q_transformSum = Angle;
+        // Eigen::AngleAxisf pitchAngle(
+        //     Eigen::AngleAxisf(transformSum[1], Eigen::Vector3f::UnitY())
+        // );
+        // Eigen::AngleAxisf yawAngle(
+        //     Eigen::AngleAxisf(transformSum[2], Eigen::Vector3f::UnitZ())
+        // ); 
+        // // Eigen::AngleAxisf Angle = Eigen::AngleAxisf(
+        // //     sqrt(transformSum[0]*transformSum[0] + 
+        // //         transformSum[1]*transformSum[1] + 
+        // //         transformSum[2]*transformSum[2]),
+        // //     Eigen::Vector3f(transformSum[0], transformSum[1], transformSum[2])
+        // // );
+        // Eigen::Quaternionf q_transformSum;
+        // q_transformSum = rollAngle * pitchAngle * yawAngle;
+        // // q_transformSum = Angle;
 
-        Eigen::Vector3f v_transformSum(transformSum[3], transformSum[4], transformSum[5]);
-        // v_transformCur = Eigen::Vector3f(-transformCur[3], -transformCur[4], -transformCur[5]);
+        // Eigen::Vector3f v_transformSum(transformSum[3], transformSum[4], transformSum[5]);
+        // // v_transformCur = Eigen::Vector3f(-transformCur[3], -transformCur[4], -transformCur[5]);
+        // v_transformSum = v_transformSum + q_transformSum * v_transformCur;
+
+        // q_transformSum = q_transformSum * q_transformCur;
+
+        // Eigen::Vector3f e_transformSum = q_transformSum.toRotationMatrix().eulerAngles(0, 1, 2);
+
+        // // tx = v_transformSum.x();
+        // // ty = v_transformSum.y();
+        // // tz = v_transformSum.z();
+
+        // // 计算积累的t
+        // transformSum[0] = e_transformSum.x();
+        // transformSum[1] = e_transformSum.y();
+        // transformSum[2] = e_transformSum.z();
+        // transformSum[3] = v_transformSum.x();
+        // transformSum[4] = v_transformSum.y();
+        // transformSum[5] = v_transformSum.z();
+
         v_transformSum = v_transformSum + q_transformSum * v_transformCur;
-
-        q_transformSum = q_transformSum * q_transformCur;
-
-        Eigen::Vector3f e_transformSum = q_transformSum.toRotationMatrix().eulerAngles(0, 1, 2);
-
-        // tx = v_transformSum.x();
-        // ty = v_transformSum.y();
-        // tz = v_transformSum.z();
-
-        // 计算积累的t
-        transformSum[0] = e_transformSum.x();
-        transformSum[1] = e_transformSum.y();
-        transformSum[2] = e_transformSum.z();
-        transformSum[3] = v_transformSum.x();
-        transformSum[4] = v_transformSum.y();
-        transformSum[5] = v_transformSum.z();
+        q_transformSum = (q_transformSum * q_transformCur).normalized();
     }
 
     void publishOdometry(){
         // 这里的旋转轴是怎么回事？
-        geometry_msgs::Quaternion geoQuat = tf::createQuaternionMsgFromRollPitchYaw(transformSum[0], transformSum[1], transformSum[2]);
+        // geometry_msgs::Quaternion geoQuat = tf::createQuaternionMsgFromRollPitchYaw(transformSum[0], transformSum[1], transformSum[2]);
 
         // rx,ry,rz转化为四元数发布
         laserOdometry.header.stamp = cloudHeader.stamp;
-        laserOdometry.pose.pose.orientation.x = geoQuat.x;
-        laserOdometry.pose.pose.orientation.y = geoQuat.y;
-        laserOdometry.pose.pose.orientation.z = geoQuat.z;
-        laserOdometry.pose.pose.orientation.w = geoQuat.w;
-        laserOdometry.pose.pose.position.x = transformSum[3];
-        laserOdometry.pose.pose.position.y = transformSum[4];
-        laserOdometry.pose.pose.position.z = transformSum[5];
+        laserOdometry.pose.pose.orientation.x = q_transformSum.x();
+        laserOdometry.pose.pose.orientation.y = q_transformSum.y();
+        laserOdometry.pose.pose.orientation.z = q_transformSum.z();
+        laserOdometry.pose.pose.orientation.w = q_transformSum.w();
+        laserOdometry.pose.pose.position.x = v_transformSum.x();
+        laserOdometry.pose.pose.position.y = v_transformSum.y();
+        laserOdometry.pose.pose.position.z = v_transformSum.z();
         pubLaserOdometry.publish(laserOdometry);
 
         // laserOdometryTrans 是用于tf广播
         laserOdometryTrans.stamp_ = cloudHeader.stamp;
-        laserOdometryTrans.setRotation(tf::Quaternion(geoQuat.x, geoQuat.y, geoQuat.z, geoQuat.w));
-        laserOdometryTrans.setOrigin(tf::Vector3(transformSum[3], transformSum[4], transformSum[5]));
+        laserOdometryTrans.setRotation(tf::Quaternion(q_transformSum.x(), q_transformSum.y(), q_transformSum.z(), q_transformSum.w()));
+        laserOdometryTrans.setOrigin(tf::Vector3(v_transformSum.x(), v_transformSum.y(), v_transformSum.z()));
         tfBroadcaster.sendTransform(laserOdometryTrans);
     }
 
